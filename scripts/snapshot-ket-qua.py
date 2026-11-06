@@ -74,6 +74,8 @@ def main():
     ap.add_argument("--per-dir", type=int, default=10, help="số file mỗi đuôi mỗi thư mục con (mặc định 10)")
     ap.add_argument("--out", required=True, help="file .tsv kết quả")
     ap.add_argument("--timeout", type=int, default=900)
+    ap.add_argument("--set", action="append", default=[], metavar="KEY=VALUE",
+                    help="ghi đè cấu hình, dạng .NET (VD --set Llm__Enabled=false); dùng được nhiều lần")
     args = ap.parse_args()
 
     if not os.path.isfile(args.dll):
@@ -96,6 +98,9 @@ def main():
         env["Watch__Folders__0"] = watch          # ghi đè danh sách thư mục trong appsettings.json
         env["Storage__DbPath"] = db_path          # DB mới, sạch
         env["DOTNET_ENVIRONMENT"] = "Production"
+        for item in args.set:
+            key, _, value = item.partition("=")
+            env[key] = value
         proc = subprocess.Popen(["dotnet", args.dll], cwd=os.path.dirname(args.dll), env=env,
                                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         try:

@@ -74,6 +74,12 @@ public class Worker(ILogger<Worker> logger, IConfiguration configuration, IAppLa
         escalation.MinTextChars = Math.Max(0, escalation.MinTextChars);
         escalation.SampleRatePct = Math.Clamp(escalation.SampleRatePct, 0, 100);
         var quota = configuration.GetSection("Llm:Quota").Get<JobQuotaOptions>() ?? new JobQuotaOptions();
+        // [Thay đổi] Tách lõi bước 2: công tắc LLM. Tắt → bỏ hàng đợi llm_job, vòng điều phối và việc tạo bù job vùng xám bên dưới.
+        bool llmEnabled = escalation.Enabled;
+        if (!llmEnabled)
+        {
+            logger.LogInformation("[LLM] Tắt (Llm:Enabled=false): chỉ chạy regex, vùng xám ghi final + needs_review, không tạo llm_job");
+        }
         logger.LogInformation("[Job] Eligibility: tối thiểu {min} ký tự, {excluded} đường dẫn loại trừ, {keywords} từ khoá P2, lấy mẫu P3 {rate}%. Hạn ngạch: P1 {p1}/giờ (vượt → hoãn), P2 {p2}/ngày, P3 {p3}/ngày, tối đa {max} job pending",
             escalation.MinTextChars, escalation.ExcludedPaths.Count, escalation.SuspiciousKeywords.Count, escalation.SampleRatePct,
             quota.P1PerHour, quota.P2PerDay, quota.P3PerDay, quota.MaxPendingJobs);
@@ -93,7 +99,7 @@ public class Worker(ILogger<Worker> logger, IConfiguration configuration, IAppLa
         // [Thay đổi] Hàng đợi llm_job (kiến trúc mục 3.2) khi khởi động: job running của lần chạy trước → pending.
         // Lỗi chỉ cảnh báo. KHÔNG tạo bù job vùng xám ở đây nữa — xem [Thay đổi] vá lỗi (buổi 11) bên dưới.
         int recovered = 0;
-        if (store != null)
+        if (store != null && llmEnabled) // [Thay đổi] Tách lõi bước 2
         {
             try
             {
@@ -167,7 +173,7 @@ public class Worker(ILogger<Worker> logger, IConfiguration configuration, IAppLa
         // trước, job tạo ra lệch hash với nội dung thật → LlmJobDispatcher luôn báo "stale_before" dù file không đổi
         // gì. Tệ hơn, job stale bị NOT EXISTS (...status<>'stale') coi là "chưa có job" nên MỖI LẦN RESTART lại tạo
         // thêm 1 job hỏng nữa cho cùng file, hàng đợi phình to dần qua từng lần khởi động (đã tái hiện thật).
-        if (store != null)
+        if (store != null && llmEnabled) // [Thay đổi] Tách lõi bước 2
         {
             try
             {
@@ -185,7 +191,7 @@ public class Worker(ILogger<Worker> logger, IConfiguration configuration, IAppLa
 
         // [Thay đổi] mục 4.12: vòng lặp riêng cho việc gửi job LLM (10 giây/lần) — tách khỏi vòng dọn dẹp 1 phút để
         // job vùng xám được xử lý sớm hơn, không phải chờ tới chu kỳ dọn dẹp.
-        Task llmLoop = store != null
+        Task llmLoop = store != null && llmEnabled // [Thay đổi] Tách lõi bước 2: LLM tắt thì không dựng client/dispatcher
             ? RunLlmDispatchLoopAsync(store, scanner, configuration, stoppingToken)
             : Task.CompletedTask;
 
