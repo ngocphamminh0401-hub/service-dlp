@@ -1,0 +1,42 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- [Thay đổi] Tách lõi bước 6: LÕI dùng chung giữa Windows/Linux — quét, phân loại, đọc file, lưu SQLite, pipeline xử lý 1 file.
+       KHÔNG được tham chiếu gói/namespace riêng của Windows hay LLM (WindowsServices, Grpc.*, PerformanceCounter, System.Security.AccessControl).
+       Namespace giữ nguyên (DlpService.Scanning, DlpService.Storage...) nên các project tham chiếu DlpService (tools, test) không phải sửa using. -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>DlpService</RootNamespace>
+  </PropertyGroup>
+
+  <!-- SDK thường không tự thêm các using của Worker (ILogger, IConfiguration...) như Microsoft.NET.Sdk.Worker của host → khai báo lại -->
+  <ItemGroup>
+    <Using Include="Microsoft.Extensions.Configuration" />
+    <Using Include="Microsoft.Extensions.DependencyInjection" />
+    <Using Include="Microsoft.Extensions.Hosting" />
+    <Using Include="Microsoft.Extensions.Logging" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="DocumentFormat.OpenXml" Version="3.5.1" />
+    <PackageReference Include="ExcelDataReader" Version="3.9.0" />
+    <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.12" />
+    <PackageReference Include="Microsoft.Extensions.Hosting" Version="10.0.12" />
+    <PackageReference Include="PdfPig" Version="0.1.11" />
+  </ItemGroup>
+
+  <!-- [Thay đổi] Copy mọi file rule JSON (kể cả thư mục con theo domain như rules/hr, rules/financial) ra thư mục chạy để RuleLoader tìm thấy
+       trong <thư mục chạy>/rules. Rule và hệ số FileConfidence thuộc LÕI (một nguồn duy nhất cho mọi hệ điều hành); project nào tham chiếu Core
+       (qua host) đều tự nhận bản copy này. Vị trí lúc chạy do IAppLayout quyết định. -->
+  <ItemGroup>
+    <None Update="rules\**\*.json" CopyToOutputDirectory="PreserveNewest" />
+    <None Update="confidence\*.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <!-- [Thay đổi] Tika native + test + host Windows truy cập các lớp internal của Core (TikaNativeRuntime.ResetForTests...) -->
+  <ItemGroup>
+    <InternalsVisibleTo Include="DlpService" />
+    <InternalsVisibleTo Include="DlpService.Tests" />
+  </ItemGroup>
+</Project>

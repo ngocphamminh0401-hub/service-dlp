@@ -1,9 +1,10 @@
 // [Thay đổi] Thêm using để dùng FileWatcherService (nay nằm ở namespace Watching)
+using DlpService.Platform; // [Thay đổi] Tách lõi bước 1: IAppLayout
 using DlpService.Scanning; // [Thay đổi] để dùng RuleLoader và RegexScanner
 using DlpService.Watching;
 using DlpService.Classification;
 using DlpService.Storage; // [Thay đổi] Ghi finding + scan_result
-using DlpService.Llm; // [Thay đổi] mục 4.12 - Worker điều phối job LLM
+using DlpService.Pipeline; // [Thay đổi] Tách lõi bước 5: IJobDispatchLoop
 using DlpService.Reading;
 using DlpService.Reading.Native; // [Thay đổi] Tika native: cấu hình + vòng đời thư viện native
 
@@ -11,7 +12,10 @@ namespace DlpService;
 
 /// <summary>Điểm khởi động luồng nền: nạp rule, tạo scanner và bắt đầu theo dõi thư mục watch-folder.</summary>
 // [Thay đổi] Router ba vùng: nhận thêm IConfiguration (DI tự truyền) để đọc ngưỡng T_high/T_low từ appsettings.json
-public class Worker(ILogger<Worker> logger, IConfiguration configuration) : BackgroundService
+// [Thay đổi] Tách lõi bước 1: nhận thêm IAppLayout (DI tự truyền) — mọi thư mục rule/DB/model lấy từ đây thay vì ghép AppContext.BaseDirectory
+// [Thay đổi] Tách lõi bước 4: + IPathPolicy, IDataFolderGuard (adapter theo hệ điều hành do host đăng ký; DI tự truyền)
+public class Worker(ILogger<Worker> logger, IConfiguration configuration, IAppLayout layout, IPathPolicy pathPolicy, IDataFolderGuard dataFolderGuard,
+    IJobDispatchLoop? dispatchLoop = null) : BackgroundService // [Thay đổi] Tách lõi bước 5: vòng điều phối job (LLM) do host đăng ký, có thể không có
 {
     // [Sửa lỗi] Watcher bị GC thu hồi khi service rảnh: trước đây FileWatcherService chỉ là BIẾN CỤC BỘ trong ExecuteAsync và không
     // được dùng sau "await Task.WhenAll" → bản Release không giữ nó trong state machine async; FileSystemWatcher của .NET chỉ tự giữ
@@ -28,7 +32,7 @@ public class Worker(ILogger<Worker> logger, IConfiguration configuration) : Back
 
         // [Thay đổi] Nạp rule từ thư mục rules/ nằm cạnh file .exe (không dùng đường dẫn tương đối,
         // vì khi chạy thành Windows Service thư mục làm việc không phải thư mục project)
-        var ruleFolder = Path.Combine(AppContext.BaseDirectory, "rules");
+        var ruleFolder = layout.RulesFolder; // [Thay đổi] Tách lõi bước 1: từ IAppLayout
         var patterns = new RuleLoader(logger).LoadFromFolder(ruleFolder);
         if (patterns.Count == 0)
         {
@@ -50,7 +54,7 @@ public class Worker(ILogger<Worker> logger, IConfiguration configuration) : Back
         }
         logger.LogInformation("Ngưỡng điểm chỗ khớp: MinConfidence={min:0.00}", minConfidence);
         var scanner = new RegexScanner(patterns, rulesVer, minConfidence);
-        var engine = new ClassificationEngine(logger);
+        var engine = new ClassificationEngine(logger, ruleFolder); // [Thay đổi] Tách lõi bước 1: truyền thư mục rule cho module compound
         // [Thay đổi] Router ba vùng: đọc mục "Score" { THigh, TLow }; thiếu hoặc sai (TLow ≥ THigh, ngoài 0-1) thì dùng
         // mặc định 0,90/0,30 + cảnh báo, không chặn service khởi động
         var routerOptions = configuration.GetSection("Score").Get<RouterOptions>() ?? new RouterOptions();
@@ -64,17 +68,20 @@ public class Worker(ILogger<Worker> logger, IConfiguration configuration) : Back
         // [Thay đổi] Ghi finding + scan_result: mở DB SQLite (mặc định <thư mục chạy>/data/dlp.db, cấu hình ở mục
         // "Storage:DbPath"; đường dẫn tương đối tính theo thư mục chạy vì thư mục làm việc của Windows Service là System32).
         // Mở thất bại → service vẫn chạy, chỉ không ghi DB (lỗi lưu trữ không được làm dừng luồng quét).
-        string dbPath = configuration["Storage:DbPath"] ?? Path.Combine("data", "dlp.db");
-        if (!Path.IsPathRooted(dbPath))
-        {
-            dbPath = Path.Combine(AppContext.BaseDirectory, dbPath);
-        }
+        // [Thay đổi] Tách lõi bước 1: đường dẫn tương đối/mặc định do IAppLayout quyết định (Windows: tính theo thư mục file chạy như cũ)
+        string dbPath = layout.ResolvePath(configuration["Storage:DbPath"] ?? layout.DefaultDbPath);
         // [Thay đổi] Eligibility + P1/P2/P3 + hạn ngạch: đọc mục "Llm" (thiếu → mặc định trong code; từ khoá P2 mặc định nằm
         // ở appsettings.json). Chặn giá trị vô lý thay vì dừng service.
         var escalation = configuration.GetSection("Llm").Get<EscalationOptions>() ?? new EscalationOptions();
         escalation.MinTextChars = Math.Max(0, escalation.MinTextChars);
         escalation.SampleRatePct = Math.Clamp(escalation.SampleRatePct, 0, 100);
         var quota = configuration.GetSection("Llm:Quota").Get<JobQuotaOptions>() ?? new JobQuotaOptions();
+        // [Thay đổi] Tách lõi bước 2: công tắc LLM. Tắt → bỏ hàng đợi llm_job, vòng điều phối và việc tạo bù job vùng xám bên dưới.
+        bool llmEnabled = escalation.Enabled;
+        if (!llmEnabled)
+        {
+            logger.LogInformation("[LLM] Tắt (Llm:Enabled=false): chỉ chạy regex, vùng xám ghi final + needs_review, không tạo llm_job");
+        }
         logger.LogInformation("[Job] Eligibility: tối thiểu {min} ký tự, {excluded} đường dẫn loại trừ, {keywords} từ khoá P2, lấy mẫu P3 {rate}%. Hạn ngạch: P1 {p1}/giờ (vượt → hoãn), P2 {p2}/ngày, P3 {p3}/ngày, tối đa {max} job pending",
             escalation.MinTextChars, escalation.ExcludedPaths.Count, escalation.SuspiciousKeywords.Count, escalation.SampleRatePct,
             quota.P1PerHour, quota.P2PerDay, quota.P3PerDay, quota.MaxPendingJobs);
@@ -82,7 +89,7 @@ public class Worker(ILogger<Worker> logger, IConfiguration configuration) : Back
         ResultStore? store = null;
         try
         {
-            store = new ResultStore(dbPath, logger, quota); // [Thay đổi] truyền logger để cảnh báo ACL/PRAGMA; + hạn ngạch job
+            store = new ResultStore(dbPath, logger, quota, dataFolderGuard); // [Thay đổi] truyền logger để cảnh báo ACL/PRAGMA; + hạn ngạch job
             logger.LogInformation("Ghi kết quả quét vào {dbPath}", dbPath);
         }
         catch (Exception ex)
@@ -94,7 +101,7 @@ public class Worker(ILogger<Worker> logger, IConfiguration configuration) : Back
         // [Thay đổi] Hàng đợi llm_job (kiến trúc mục 3.2) khi khởi động: job running của lần chạy trước → pending.
         // Lỗi chỉ cảnh báo. KHÔNG tạo bù job vùng xám ở đây nữa — xem [Thay đổi] vá lỗi (buổi 11) bên dưới.
         int recovered = 0;
-        if (store != null)
+        if (store != null && llmEnabled) // [Thay đổi] Tách lõi bước 2
         {
             try
             {
@@ -118,11 +125,8 @@ public class Worker(ILogger<Worker> logger, IConfiguration configuration) : Back
         // [Thay đổi] FileConfidence 2 nhánh (shadow): nạp hệ số từ <thư mục chạy>/confidence/file-confidence-v1.json (đổi được
         // qua "FileConfidence:ModelPath"). Lỗi → cảnh báo, service chạy tiếp không có điểm này (chỉ là tín hiệu quan sát).
         FileConfidenceScorer? fileConfidence = null;
-        string confPath = configuration["FileConfidence:ModelPath"] ?? Path.Combine("confidence", "file-confidence-v1.json");
-        if (!Path.IsPathRooted(confPath))
-        {
-            confPath = Path.Combine(AppContext.BaseDirectory, confPath);
-        }
+        // [Thay đổi] Tách lõi bước 1: như dbPath ở trên, qua IAppLayout
+        string confPath = layout.ResolvePath(configuration["FileConfidence:ModelPath"] ?? layout.DefaultConfidenceModelPath);
         try
         {
             fileConfidence = new FileConfidenceScorer(FileConfidenceModel.Load(confPath));
@@ -144,9 +148,26 @@ public class Worker(ILogger<Worker> logger, IConfiguration configuration) : Back
 
         // [Sửa lỗi] Gán vào trường _fileWatcher (không dùng biến cục bộ) — xem giải thích ở khai báo trường
         _fileWatcher = new FileWatcherService(scanner, engine, logger, routerOptions, store, escalation, fileConfidence, // [Thay đổi] + eligibility, + FileConfidence
-            maxConcurrency); // [Thay đổi] + giới hạn đồng thời
-        _fileWatcher.StartWatching(@"D:\Service-DLP\watch-folder");
-        logger.LogInformation("Đang theo dõi thư mục: D:\\Service-DLP\\watch-folder");
+            maxConcurrency, pathPolicy: pathPolicy); // [Thay đổi] + giới hạn đồng thời; Tách lõi bước 4: + quy tắc đường dẫn
+        // [Thay đổi] shared-core: thư mục theo dõi đọc từ cấu hình "Watch:Folders" (trước đây hard-code ổ D:). Không có mặc định:
+        // thiếu/rỗng → báo LỖI rõ rồi dừng worker, vì chạy mà không theo dõi gì còn tệ hơn (service trông bình thường nhưng không quét).
+        var watchFolders = (configuration.GetSection("Watch:Folders").Get<string[]>() ?? [])
+            .Where(f => !string.IsNullOrWhiteSpace(f))
+            .Select(Path.GetFullPath)
+            .Distinct()
+            .ToList();
+        if (watchFolders.Count == 0)
+        {
+            logger.LogError("Chưa cấu hình \"Watch:Folders\" (danh sách thư mục cần theo dõi) trong appsettings.json — service không có gì để quét");
+            _fileWatcher.Dispose();
+            _fileWatcher = null;
+            return;
+        }
+        foreach (var folder in watchFolders)
+        {
+            _fileWatcher.StartWatching(folder);
+            logger.LogInformation("Đang theo dõi thư mục: {folder}", folder);
+        }
 
         // [Thay đổi] Vá lỗi (buổi 11): EnqueueMissingGreyJobs ĐỌC scan_result.file_hash để tạo job bù — PHẢI chạy
         // SAU KHI StartWatching quét xong lượt đầu (ScanExistingFiles chạy đồng bộ bên trong, xong mới return), để
@@ -154,7 +175,7 @@ public class Worker(ILogger<Worker> logger, IConfiguration configuration) : Back
         // trước, job tạo ra lệch hash với nội dung thật → LlmJobDispatcher luôn báo "stale_before" dù file không đổi
         // gì. Tệ hơn, job stale bị NOT EXISTS (...status<>'stale') coi là "chưa có job" nên MỖI LẦN RESTART lại tạo
         // thêm 1 job hỏng nữa cho cùng file, hàng đợi phình to dần qua từng lần khởi động (đã tái hiện thật).
-        if (store != null)
+        if (store != null && llmEnabled) // [Thay đổi] Tách lõi bước 2
         {
             try
             {
@@ -172,8 +193,9 @@ public class Worker(ILogger<Worker> logger, IConfiguration configuration) : Back
 
         // [Thay đổi] mục 4.12: vòng lặp riêng cho việc gửi job LLM (10 giây/lần) — tách khỏi vòng dọn dẹp 1 phút để
         // job vùng xám được xử lý sớm hơn, không phải chờ tới chu kỳ dọn dẹp.
-        Task llmLoop = store != null
-            ? RunLlmDispatchLoopAsync(store, scanner, configuration, stoppingToken)
+        // [Thay đổi] Tách lõi bước 5: chạy vòng do host cung cấp (LLM) qua IJobDispatchLoop; host không đăng ký (Linux) hoặc LLM tắt thì bỏ qua
+        Task llmLoop = store != null && llmEnabled && dispatchLoop != null
+            ? dispatchLoop.RunAsync(store, scanner, stoppingToken)
             : Task.CompletedTask;
 
         async Task RunMainLoopAsync()
@@ -215,69 +237,6 @@ public class Worker(ILogger<Worker> logger, IConfiguration configuration) : Back
 
             // [Thay đổi] Tika native: huỷ parser và isolate GraalVM khi service dừng (an toàn khi chưa bật/chưa nạp)
             TikaNativeRuntime.Shutdown();
-        }
-    }
-
-    // [Thay đổi] mục 4.12 - Worker điều phối job: dựng GuardedInferenceClient + LlmJobDispatcher 1 lần, lặp mỗi 10
-    // giây. Luôn "await" TryDispatchOnceAsync trước khi lặp lại → tự nhiên chỉ có 1 job chạy đồng thời (mục 4.12:
-    // "1 job đồng thời"), không cần khoá/semaphore riêng.
-    private async Task RunLlmDispatchLoopAsync(ResultStore store, RegexScanner scanner,
-        IConfiguration configuration, CancellationToken stoppingToken)
-    {
-        string pipeName = configuration["Llm:PipeName"] ?? "dlp-llm";
-        // [Thay đổi] mục 5.5: đường dẫn exe LLM host thật (vd DlpLlmHost.exe) để client tự kiểm tra sau khi kết
-        // nối pipe — chưa cấu hình (chưa triển khai DlpLlmHost thật thay DlpFakeLlm) thì bỏ qua kiểm tra, KHÔNG ép
-        // buộc, tránh chặn luồng dev/test hiện tại.
-        string? serverExePath = configuration["Llm:ServerExePath"];
-        var trustPolicy = serverExePath != null
-            ? new PipeServerTrustPolicy(serverExePath, configuration.GetValue("Llm:RequireServerSignature", false))
-            : null;
-        var dispatcherOptions = new LlmJobDispatcherOptions
-        {
-            TokenBudget = Math.Max(200, configuration.GetValue("Llm:TokenBudget", 2000)),
-            JobDeadline = TimeSpan.FromSeconds(Math.Max(1, configuration.GetValue("Llm:JobDeadlineSeconds", 60)))
-        };
-        var idleOptions = new MachineIdleOptions
-        {
-            MaxCpuPercent = configuration.GetValue("Llm:MaxCpuPercent", 50.0),
-            MinBatteryPercent = configuration.GetValue("Llm:MinBatteryPercent", 20.0)
-        };
-
-        using var inferenceClient = InferenceClient.ConnectNamedPipe(pipeName, trustPolicy);
-        var breaker = new CircuitBreaker();
-        var guardedClient = new GuardedInferenceClient(inferenceClient, breaker);
-        var idleChecker = new MachineIdleChecker(idleOptions);
-        var fileReader = new FileReaderService();
-        var dispatcher = new LlmJobDispatcher(store, fileReader, scanner, guardedClient, idleChecker, dispatcherOptions, logger);
-
-        logger.LogInformation("[LLM] Worker điều phối job: pipe={pipe}, ngân sách {budget} token, deadline {deadline}s, CPU ≤ {cpu}%, pin ≥ {battery}%",
-            pipeName, dispatcherOptions.TokenBudget, dispatcherOptions.JobDeadline.TotalSeconds, idleOptions.MaxCpuPercent, idleOptions.MinBatteryPercent);
-
-        while (!stoppingToken.IsCancellationRequested)
-        {
-            try
-            {
-                string outcome = await dispatcher.TryDispatchOnceAsync(stoppingToken);
-                if (outcome != "no_job" && !outcome.StartsWith("not_idle", StringComparison.Ordinal) && outcome != "circuit_open")
-                {
-                    logger.LogInformation("[LLM] {outcome}", outcome);
-                }
-                else if (logger.IsEnabled(LogLevel.Debug))
-                {
-                    logger.LogDebug("[LLM] {outcome}", outcome);
-                }
-            }
-            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
-            {
-                break;
-            }
-            catch (Exception ex)
-            {
-                // [Thay đổi] Nguyên tắc P3: lỗi ở vòng điều phối LLM không được làm dừng cả service
-                logger.LogWarning(ex, "[LLM] Lỗi vòng điều phối job, thử lại ở lượt sau");
-            }
-
-            await Task.Delay(TimeSpan.FromSeconds(10), stoppingToken);
         }
     }
 
