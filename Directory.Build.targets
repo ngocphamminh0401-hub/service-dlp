@@ -31,4 +31,14 @@
           DestinationFolder="$(OutDir)"
           Condition="Exists('$(OutDir)libe_sqlite3.so')" />
   </Target>
+
+  <!-- [Thay đổi] GĐ4: "dotnet publish -r linux-x64" lấy libe_sqlite3.so THẲNG từ gói NuGet (không qua thư mục build) → phải chép đè cả ở
+       thư mục publish, nếu không gói .deb/.rpm sẽ mang bản cần glibc 2.34 và không chạy được trên máy cũ (Ubuntu 18.04, CentOS 7).
+       Bản tự biên dịch cần glibc thấp hơn nên chạy được cả trên máy mới. -->
+  <Target Name="DlpReplaceSqliteNativeOnPublish"
+          AfterTargets="Publish"
+          Condition="$([MSBuild]::IsOSPlatform('Linux')) And Exists('$(DlpSqliteNativeLib)') And Exists('$(PublishDir)libe_sqlite3.so')">
+    <Copy SourceFiles="$(DlpSqliteNativeLib)" DestinationFolder="$(PublishDir)" />
+    <Message Importance="high" Text="[DLP] Đã thay libe_sqlite3.so trong $(PublishDir) bằng bản tự biên dịch ($(DlpSqliteNativeLib))" />
+  </Target>
 </Project>

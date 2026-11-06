@@ -1,0 +1,2 @@
+/etc/dlp-service/appsettings.json
+/etc/sysctl.d/60-dlp-service.conf

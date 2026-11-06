@@ -1,0 +1,7 @@
+#!/bin/sh
+# [Thay đổi] File mới (GĐ4): dpkg gọi sau khi giải nén gói. "configure" = cài mới hoặc nâng cấp → làm hết trong dlp-setup.sh.
+set -e
+case "$1" in
+  configure) /usr/lib/dlp-service/dlp-setup.sh configure ;;
+esac
+exit 0

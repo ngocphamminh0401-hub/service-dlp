@@ -1,0 +1,13 @@
+Package: dlp-service
+Version: @VERSION@
+Architecture: amd64
+Maintainer: @MAINTAINER@
+Section: admin
+Priority: optional
+Installed-Size: @SIZE_KB@
+Depends: libc6 (>= 2.27), libgcc1 | libgcc-s1, libstdc++6, zlib1g, libssl1.1 | libssl3 | libssl3t64 | libssl1.0.0, libicu55 | libicu57 | libicu60 | libicu63 | libicu66 | libicu67 | libicu70 | libicu72 | libicu74, libcap2-bin, passwd, util-linux
+Description: DLP Data Classification Service
+ Theo dõi thư mục của người dùng (inotify), trích text từ txt/csv/docx/xlsx/pptx/pdf/eml,
+ quét regex dữ liệu nhạy cảm (CCCD, số thẻ, tài khoản ngân hàng...) và phân loại mức nhạy cảm.
+ Chạy dưới user hệ thống "dlp" với đúng 1 quyền đọc file (CAP_DAC_READ_SEARCH), không có mạng.
+ Bản .NET tự chứa — không cần cài .NET.

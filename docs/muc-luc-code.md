@@ -147,6 +147,17 @@ Tích hợp Tika native (tika_native.dll biên dịch bằng GraalVM). Cấu hì
 | Program.cs | — | Content root = thư mục file chạy; `AddLinuxPlatform()`; `Worker`; không LLM. Lệnh `dlp-service explain <file_id>` |
 | appsettings.json | — | `Llm:Enabled=false`, `FileConfidence:Enabled=false`, `Watch:MaxConcurrency=2`, `Watch:Folders` trống (truyền khi chạy) |
 
+## packaging/linux/ *(GĐ4 — đóng gói)*
+| File | Việc chính |
+|---|---|
+| build-packages.sh | `dotnet publish` tự chứa linux-x64 → cây /opt, /etc, /usr → `dist/*.deb` (+ `.rpm` nếu có rpmbuild) |
+| dlp-setup.sh | Cài/gỡ dùng chung cho deb + rpm: `configure` (user dlp, thư mục + quyền, chọn unit theo phiên bản systemd, setcap cho máy cũ, sysctl, bật service), `stop`, `remove`, `purge`; `DLP_SETUP_DRYRUN=1` |
+| systemd/dlp-service.service, dlp-service-legacy.service | Unit có hardening cho systemd ≥ 232 và 219–231 |
+| deb/, rpm/ | Script dpkg (postinst/prerm/postrm, control, conffiles) và spec rpm |
+| etc/appsettings.json, etc/sysctl-60-dlp-service.conf | Cấu hình máy mặc định (/home/*/Documents…), nâng max_user_watches |
+| bin/dlp-service | /usr/bin/dlp-service: `sudo dlp-service explain <id>` chạy dưới user dlp |
+| test-install.sh | Kiểm thử cài thật (root): hardening, kill -9, nâng cấp, remove, purge |
+
 ## rules/ (dữ liệu, không phải code)
 | Thư mục/File | Nội dung |
 |---|---|

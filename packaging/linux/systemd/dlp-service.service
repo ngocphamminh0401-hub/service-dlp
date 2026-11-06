@@ -1,0 +1,65 @@
+# [Thay đổi] File mới (GĐ4, docs/ke-hoach-trien-khai-linux.md mục 5.4): unit systemd cho máy có systemd >= 232
+# (Ubuntu 18.04 = 237, 20.04 = 245, 22.04 = 249, 24.04 = 255; RHEL/CentOS 8 = 239). Máy cũ hơn dùng dlp-service-legacy.service.
+# dlp-setup.sh tự chọn bản phù hợp theo "systemctl --version" và chép vào thư mục unit của hệ thống.
+# Thiết lập nào systemd không biết (bản cũ hơn bản đã ghi) chỉ bị cảnh báo "Unknown lvalue" và bỏ qua — không làm unit lỗi.
+
+[Unit]
+Description=DLP Data Classification Service (phân loại dữ liệu nhạy cảm)
+Documentation=file:///usr/share/doc/dlp-service/README
+After=local-fs.target
+# Chế độ System cần các thư mục này (gói cài đặt tạo). Thiếu → không khởi động thay vì chạy sai chỗ.
+ConditionPathIsDirectory=/var/lib/dlp-service
+ConditionPathIsDirectory=/etc/dlp-service/rules
+
+[Service]
+# AddSystemd() của .NET gửi READY=1 khi host đã khởi động xong → "systemctl start" chỉ trả về khi service thật sự chạy
+Type=notify
+ExecStart=/opt/dlp-service/dlp-service
+WorkingDirectory=/opt/dlp-service
+Environment=DLP_LAYOUT=system
+# Tắt cổng chẩn đoán của .NET (socket cho phép chương trình cùng user đọc bộ nhớ/dump tiến trình — bộ nhớ có thể chứa nội dung file vừa quét)
+Environment=DOTNET_EnableDiagnostics=0
+TimeoutStartSec=120
+TimeoutStopSec=30
+Restart=on-failure
+RestartSec=5
+
+# ---- Quyền (D5): user hệ thống "dlp", ĐÚNG 1 quyền đặc biệt = đọc được mọi file (không ghi, không chạy lệnh với quyền root) ----
+User=dlp
+Group=dlp
+NoNewPrivileges=yes
+CapabilityBoundingSet=CAP_DAC_READ_SEARCH
+AmbientCapabilities=CAP_DAC_READ_SEARCH
+# File DB/log tạo SAU lúc khoá thư mục cũng chỉ chủ sở hữu đọc được (0600) — tồn đọng GĐ2
+UMask=0077
+
+# ---- File system: chỉ ghi được DB + log; /home chỉ đọc ----
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/var/lib/dlp-service /var/log/dlp-service
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+
+# ---- Mạng: bản Linux KHÔNG có LLM → không cần mạng. Service đọc được mọi file nhưng không gửi được ra ngoài. ----
+# AF_UNIX vẫn cần cho sd_notify (báo READY cho systemd) và journald.
+PrivateNetwork=yes
+RestrictAddressFamilies=AF_UNIX
+
+# ---- Giảm bề mặt tấn công (parser docx/pdf/xlsx xử lý file người dùng) ----
+RestrictRealtime=yes
+RestrictNamespaces=yes
+LockPersonality=yes
+# KHÔNG bật MemoryDenyWriteExecute: trình biên dịch JIT của .NET cần vùng nhớ vừa ghi vừa chạy.
+
+# ---- Tài nguyên (D6): không làm giật máy người dùng. Nền < 2 % (đo GĐ3: 0,47 %), đợt dồn tối đa 30 % một nhân ----
+Nice=10
+IOSchedulingClass=idle
+CPUQuota=30%
+CPUWeight=20
+MemoryMax=512M
+
+[Install]
+WantedBy=multi-user.target

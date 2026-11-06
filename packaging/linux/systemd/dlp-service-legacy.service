@@ -1,0 +1,51 @@
+# [Thay đổi] File mới (GĐ4, mục 5.4 cột "Thay thế trên máy cũ"): unit cho systemd 219–231 (CentOS 7 = 219, Ubuntu 16.04 = 229).
+# Khác bản mới:
+#   - Quyền đọc file người dùng: không dùng AmbientCapabilities (cần 229) mà dlp-setup.sh gắn capability lên chính file chạy
+#     (setcap cap_dac_read_search+ep /opt/dlp-service/dlp-service). Vì vậy KHÔNG được bật NoNewPrivileges — cờ đó chặn việc nhận
+#     capability từ file. CapabilityBoundingSet vẫn giới hạn tiến trình chỉ có đúng quyền này.
+#   - ProtectSystem=full (strict cần 232) + ReadWriteDirectories / ProtectHome=read-only (có từ 214).
+#   - MemoryLimit thay MemoryMax, CPUShares thay CPUWeight (cgroup v1).
+#   - Bỏ các thiết lập systemd 219 chưa có (ProtectKernel*, RestrictNamespaces, LockPersonality...).
+
+[Unit]
+Description=DLP Data Classification Service (phân loại dữ liệu nhạy cảm)
+Documentation=file:///usr/share/doc/dlp-service/README
+After=local-fs.target
+ConditionPathIsDirectory=/var/lib/dlp-service
+ConditionPathIsDirectory=/etc/dlp-service/rules
+
+[Service]
+Type=notify
+ExecStart=/opt/dlp-service/dlp-service
+WorkingDirectory=/opt/dlp-service
+Environment=DLP_LAYOUT=system
+# Tắt cổng chẩn đoán của .NET (socket cho phép chương trình cùng user đọc bộ nhớ/dump tiến trình — bộ nhớ có thể chứa nội dung file vừa quét)
+Environment=DOTNET_EnableDiagnostics=0
+TimeoutStartSec=120
+TimeoutStopSec=30
+Restart=on-failure
+RestartSec=5
+
+User=dlp
+Group=dlp
+CapabilityBoundingSet=CAP_DAC_READ_SEARCH
+UMask=0077
+
+ProtectSystem=full
+ProtectHome=read-only
+ReadWriteDirectories=/var/lib/dlp-service /var/log/dlp-service
+PrivateTmp=yes
+PrivateDevices=yes
+
+PrivateNetwork=yes
+RestrictAddressFamilies=AF_UNIX
+
+Nice=10
+IOSchedulingClass=idle
+CPUQuota=30%
+# 1024 (mặc định) × 20 % ≈ 205
+CPUShares=205
+MemoryLimit=512M
+
+[Install]
+WantedBy=multi-user.target

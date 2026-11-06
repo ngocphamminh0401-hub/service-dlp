@@ -1,0 +1,17 @@
+#!/bin/sh
+# [Thay đổi] File mới (GĐ4): dpkg gọi sau khi gỡ. Lúc này /usr/lib/dlp-service/dlp-setup.sh ĐÃ BỊ XOÁ cùng gói → không gọi được;
+# làm trực tiếp phần tối thiểu (giữ cho khớp với dlp-setup.sh remove/purge).
+#   remove: xoá unit đã chép, GIỮ dữ liệu + user.   purge: xoá thêm /var/lib, /var/log, /etc/dlp-service, user + group dlp.
+set -e
+case "$1" in
+  remove|purge)
+    for d in /lib/systemd/system /usr/lib/systemd/system; do rm -f "$d/dlp-service.service"; done
+    if [ -d /run/systemd/system ]; then systemctl daemon-reload || true; fi
+    ;;
+esac
+if [ "$1" = purge ]; then
+  rm -rf /var/lib/dlp-service /var/log/dlp-service /etc/dlp-service
+  if getent passwd dlp >/dev/null 2>&1; then userdel dlp || true; fi
+  if getent group dlp >/dev/null 2>&1; then groupdel dlp || true; fi
+fi
+exit 0

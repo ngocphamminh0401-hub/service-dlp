@@ -1,0 +1,33 @@
+DLP Data Classification Service — bản Linux
+============================================
+([Thay đổi] File mới GĐ4 — cài vào /usr/share/doc/dlp-service/README)
+
+Cài đặt
+  Ubuntu/Debian:  sudo apt install ./dlp-service_<phiên bản>_amd64.deb
+  CentOS/RHEL:    sudo yum install ./dlp-service-<phiên bản>-1.x86_64.rpm
+  Service tự bật và khởi động. Người dùng thường không dừng được (cần sudo).
+
+Vị trí
+  /opt/dlp-service/                    chương trình (bản .NET tự chứa)
+  /etc/dlp-service/appsettings.json    cấu hình của máy (sửa xong: sudo systemctl restart dlp-service)
+  /etc/dlp-service/rules/              rule phát hiện (cập nhật rule = cập nhật gói; sửa tay sẽ bị ghi đè khi nâng cấp)
+  /var/lib/dlp-service/dlp.db          kết quả quét — chỉ user dlp đọc được (0700)
+  /var/log/dlp-service/                log — chỉ user dlp đọc được (0700); tự xoay vòng 5 MB/phần, xoá sau 7 ngày
+  /etc/sysctl.d/60-dlp-service.conf    nâng fs.inotify.max_user_watches lên 524288
+
+Thư mục theo dõi mặc định: /home/*/Documents, /home/*/Desktop, /home/*/Downloads
+(người dùng mới được thêm trong vòng 60 giây; thư mục ẩn và node_modules... không theo dõi).
+
+Kiểm tra
+  systemctl status dlp-service
+  journalctl -u dlp-service
+  sudo tail -f /var/log/dlp-service/dlpservice-$(date +%F).log
+  sudo dlp-service explain <file_id>
+
+Gỡ
+  Ubuntu:  sudo apt remove dlp-service    (giữ dữ liệu)   ·  sudo apt purge dlp-service   (xoá sạch)
+  CentOS:  sudo yum remove dlp-service    (giữ dữ liệu; xoá sạch: sudo rm -rf /var/lib/dlp-service /var/log/dlp-service /etc/dlp-service && sudo userdel dlp)
+
+Bảo mật (systemd)
+  User dlp, chỉ 1 quyền CAP_DAC_READ_SEARCH (đọc mọi file, không ghi). Không có mạng (PrivateNetwork). Chỉ ghi được
+  /var/lib/dlp-service và /var/log/dlp-service. CPU tối đa 30 % một nhân, RAM 512 MB, ưu tiên thấp (Nice 10, IO idle).

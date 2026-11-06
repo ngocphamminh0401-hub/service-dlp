@@ -1,0 +1,45 @@
+# [Thay đổi] File mới (GĐ4): spec gói .rpm (CentOS 7+, RHEL 8+). build-packages.sh thay @...@ rồi gọi rpmbuild.
+# Cài/gỡ dồn vào /usr/lib/dlp-service/dlp-setup.sh như gói .deb. rpm không có "purge": "rpm -e" GIỮ dữ liệu; gỡ sạch xem README.
+%global __os_install_post %{nil}
+%global debug_package %{nil}
+%define _build_id_links none
+
+Name:           dlp-service
+Version:        @VERSION@
+Release:        1
+Summary:        DLP Data Classification Service
+License:        Proprietary
+BuildArch:      x86_64
+AutoReqProv:    no
+Requires:       glibc, libgcc, libstdc++, zlib, openssl-libs, libicu, libcap, shadow-utils, util-linux, systemd
+
+%description
+Theo dõi thư mục của người dùng (inotify), quét dữ liệu nhạy cảm và phân loại mức nhạy cảm.
+Chạy dưới user hệ thống "dlp" với đúng 1 quyền đọc file (CAP_DAC_READ_SEARCH), không có mạng.
+
+%install
+cp -a @STAGE@/. %{buildroot}/
+
+%files
+%defattr(-,root,root,-)
+/opt/dlp-service
+/usr/bin/dlp-service
+/usr/lib/dlp-service
+/usr/share/doc/dlp-service
+%dir /etc/dlp-service
+%config(noreplace) /etc/dlp-service/appsettings.json
+/etc/dlp-service/rules
+%config(noreplace) /etc/sysctl.d/60-dlp-service.conf
+
+%post
+/usr/lib/dlp-service/dlp-setup.sh configure
+
+%preun
+# $1 = 0: gỡ hẳn (không phải nâng cấp)
+if [ "$1" -eq 0 ]; then /usr/lib/dlp-service/dlp-setup.sh stop; fi
+
+%postun
+if [ "$1" -eq 0 ]; then
+  rm -f /usr/lib/systemd/system/dlp-service.service
+  systemctl daemon-reload || true
+fi

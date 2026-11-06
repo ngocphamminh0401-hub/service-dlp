@@ -18,3 +18,8 @@ tools/tika-bench/corpus*/
 tools/perf/results/
 tools/tika-native/target/
 tools/tika-native/build*/
+
+# [Thay đổi] GĐ4: gói .deb/.rpm build ra (packaging/linux/build-packages.sh)
+dist/
+# [Thay đổi] GĐ4: log của packaging/linux/test-install.sh
+dlp-package-test-*.log

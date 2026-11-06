@@ -1,0 +1,8 @@
+#!/bin/sh
+# [Thay đổi] File mới (GĐ4): dpkg gọi trước khi gỡ. "remove" = gỡ thật → dừng service. "upgrade" = nâng cấp → không dừng ở đây
+# (postinst của bản mới sẽ restart), để service ngừng ít nhất có thể.
+set -e
+case "$1" in
+  remove|deconfigure) /usr/lib/dlp-service/dlp-setup.sh stop ;;
+esac
+exit 0
