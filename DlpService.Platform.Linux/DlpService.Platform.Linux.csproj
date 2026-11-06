@@ -14,6 +14,11 @@
     <ProjectReference Include="..\DlpService.Core\DlpService.Core.csproj" />
   </ItemGroup>
 
+  <!-- [Thay đổi] GĐ3: test kiểm thứ tự ưu tiên cấu hình (LinuxHost.AddSystemConfigFile là internal) -->
+  <ItemGroup>
+    <InternalsVisibleTo Include="DlpService.Tests" />
+  </ItemGroup>
+
   <!-- AddLinuxPlatform() mở rộng HostApplicationBuilder + gọi AddSystemd() -->
   <ItemGroup>
     <PackageReference Include="Microsoft.Extensions.Hosting.Systemd" Version="10.0.12" />

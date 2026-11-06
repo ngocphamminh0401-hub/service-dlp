@@ -15,7 +15,7 @@ namespace DlpService;
 // [Thay đổi] Tách lõi bước 1: nhận thêm IAppLayout (DI tự truyền) — mọi thư mục rule/DB/model lấy từ đây thay vì ghép AppContext.BaseDirectory
 // [Thay đổi] Tách lõi bước 4: + IPathPolicy, IDataFolderGuard (adapter theo hệ điều hành do host đăng ký; DI tự truyền)
 public class Worker(ILogger<Worker> logger, IConfiguration configuration, IAppLayout layout, IPathPolicy pathPolicy, IDataFolderGuard dataFolderGuard,
-    IJobDispatchLoop? dispatchLoop = null) : BackgroundService // [Thay đổi] Tách lõi bước 5: vòng điều phối job (LLM) do host đăng ký, có thể không có
+    IJobDispatchLoop? dispatchLoop = null, IFileChangeSource? changeSource = null) : BackgroundService // [Thay đổi] Tách lõi bước 5: vòng điều phối job (LLM) do host đăng ký, có thể không có
 {
     // [Sửa lỗi] Watcher bị GC thu hồi khi service rảnh: trước đây FileWatcherService chỉ là BIẾN CỤC BỘ trong ExecuteAsync và không
     // được dùng sau "await Task.WhenAll" → bản Release không giữ nó trong state machine async; FileSystemWatcher của .NET chỉ tự giữ
@@ -156,8 +156,16 @@ public class Worker(ILogger<Worker> logger, IConfiguration configuration, IAppLa
         }
 
         // [Sửa lỗi] Gán vào trường _fileWatcher (không dùng biến cục bộ) — xem giải thích ở khai báo trường
+        // [Thay đổi] GĐ3: tuỳ chọn theo dõi (loại trừ thư mục, đối soát, làm mới mẫu, metric) — thiếu mục nào thì giữ hành vi cũ
+        var watchOptions = ReadWatchOptions(configuration, pathPolicy);
         _fileWatcher = new FileWatcherService(scanner, engine, logger, routerOptions, store, escalation, fileConfidence, // [Thay đổi] + eligibility, + FileConfidence
-            maxConcurrency, pathPolicy: pathPolicy); // [Thay đổi] + giới hạn đồng thời; Tách lõi bước 4: + quy tắc đường dẫn
+            maxConcurrency, changeSource: changeSource, pathPolicy: pathPolicy, // [Thay đổi] + giới hạn đồng thời; Tách lõi bước 4: + quy tắc đường dẫn
+            options: watchOptions); // [Thay đổi] GĐ3: + nguồn sự kiện do host đăng ký (Linux: inotify; không đăng ký → FileSystemWatcher) + tuỳ chọn
+        if (!watchOptions.Exclusion.IsEmpty)
+        {
+            logger.LogInformation("[Watch] Bỏ qua thư mục: {hidden}{names}", watchOptions.Exclusion.SkipHidden ? "thư mục ẩn (.*), " : "",
+                string.Join(", ", watchOptions.Exclusion.DirectoryNames));
+        }
         // [Thay đổi] shared-core: thư mục theo dõi đọc từ cấu hình "Watch:Folders" (trước đây hard-code ổ D:). Không có mặc định:
         // thiếu/rỗng → báo LỖI rõ rồi dừng worker, vì chạy mà không theo dõi gì còn tệ hơn (service trông bình thường nhưng không quét).
         // [Thay đổi] GĐ2 (R8): mỗi mục có thể là MẪU ("/home/*/Documents") → mở rộng thành các thư mục có thật lúc khởi động
@@ -169,6 +177,7 @@ public class Worker(ILogger<Worker> logger, IConfiguration configuration, IAppLa
                 watchFolders.Add(Path.GetFullPath(entry));
                 continue;
             }
+            _fileWatcher.TrackPattern(entry); // [Thay đổi] GĐ3 (3.5): ghi nhớ mẫu để bắt người dùng / thư mục tạo sau
             var expanded = WatchFolderPatterns.Expand(entry);
             if (expanded.Count == 0)
             {
@@ -181,7 +190,10 @@ public class Worker(ILogger<Worker> logger, IConfiguration configuration, IAppLa
             watchFolders.AddRange(expanded);
         }
         watchFolders = watchFolders.Distinct().ToList();
-        if (watchFolders.Count == 0)
+        // [Thay đổi] GĐ3: chỉ có mẫu mà lúc này chưa khớp thư mục nào (VD máy chưa có người dùng) vẫn chạy tiếp — vòng làm mới mẫu sẽ bắt sau
+        bool hasPatterns = (configuration.GetSection("Watch:Folders").Get<string[]>() ?? []).Any(WatchFolderPatterns.IsPattern)
+            && watchOptions.PatternRefreshInterval > TimeSpan.Zero;
+        if (watchFolders.Count == 0 && !hasPatterns)
         {
             logger.LogError("Chưa cấu hình \"Watch:Folders\" (danh sách thư mục cần theo dõi) trong appsettings.json — service không có gì để quét");
             _fileWatcher.Dispose();
@@ -193,6 +205,7 @@ public class Worker(ILogger<Worker> logger, IConfiguration configuration, IAppLa
             _fileWatcher.StartWatching(folder);
             logger.LogInformation("Đang theo dõi thư mục: {folder}", folder);
         }
+        _fileWatcher.StartBackgroundTasks(); // [Thay đổi] GĐ3: đối soát định kỳ, làm mới mẫu, metric (chỉ những gì đã bật trong cấu hình)
 
         // [Thay đổi] Vá lỗi (buổi 11): EnqueueMissingGreyJobs ĐỌC scan_result.file_hash để tạo job bù — PHẢI chạy
         // SAU KHI StartWatching quét xong lượt đầu (ScanExistingFiles chạy đồng bộ bên trong, xong mới return), để
@@ -290,5 +303,20 @@ public class Worker(ILogger<Worker> logger, IConfiguration configuration, IAppLa
         {
             logger.LogWarning(ex, "[Dọn dẹp] Lỗi khi dọn dữ liệu cũ, thử lại ở chu kỳ sau");
         }
+    }
+
+    // [Thay đổi] GĐ3: đọc mục "Watch" → WatchOptions. Giá trị âm/thiếu → tắt tính năng tương ứng (giữ hành vi cũ).
+    internal static WatchOptions ReadWatchOptions(IConfiguration configuration, IPathPolicy pathPolicy)
+    {
+        var names = configuration.GetSection("Watch:ExcludeDirectoryNames").Get<string[]>() ?? [];
+        var comparer = pathPolicy.Comparison == StringComparison.Ordinal ? StringComparer.Ordinal : StringComparer.OrdinalIgnoreCase;
+        static TimeSpan Positive(TimeSpan t) => t > TimeSpan.Zero ? t : TimeSpan.Zero;
+        return new WatchOptions
+        {
+            Exclusion = new WatchExclusion(configuration.GetValue("Watch:SkipHidden", false), names, comparer),
+            ReconcileInterval = Positive(TimeSpan.FromMinutes(configuration.GetValue("Watch:ReconcileIntervalMinutes", 0.0))),
+            PatternRefreshInterval = Positive(TimeSpan.FromSeconds(configuration.GetValue("Watch:PatternRefreshSeconds", 0.0))),
+            MetricsInterval = Positive(TimeSpan.FromSeconds(configuration.GetValue("Watch:MetricsIntervalSeconds", 0.0))),
+        };
     }
 }

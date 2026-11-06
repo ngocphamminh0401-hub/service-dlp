@@ -1,6 +1,9 @@
 // [Thay đổi] File mới (kế hoạch tách lõi, bước 4): cài đặt IFileChangeSource bằng FileSystemWatcher của .NET — mã DI CHUYỂN NGUYÊN VĂN từ
 // FileWatcherService.StartWatching/Dispose. FileSystemWatcher là API chung của .NET (Windows dùng ReadDirectoryChangesW, Linux dùng inotify)
 // nên cài đặt này dùng được cả hai; riêng Linux sẽ cần chỉnh thêm (giới hạn watch, thư mục ẩn...) ở giai đoạn Linux.
+// [Thay đổi] GĐ3: bản Linux dùng InotifyFileChangeSource (DlpService.Platform.Linux) — FileSystemWatcher không cho bỏ thư mục con khỏi việc
+// theo dõi (IncludeSubdirectories gắn watch lên MỌI thư mục con) và không cho biết số watch. Lớp này vẫn là nguồn của bản Windows, và là
+// phương án dự phòng trên Linux ("Watch:Backend": "fsw"). Loại trừ thư mục ở đây chỉ LỌC SỰ KIỆN (vẫn tốn watch trên Linux).
 namespace DlpService.Platform;
 
 /// <summary>Theo dõi thư mục bằng <see cref="FileSystemWatcher"/> (mỗi thư mục 1 watcher).</summary>
@@ -11,7 +14,8 @@ namespace DlpService.Platform;
 /// con mới xuất hiện (tạo mới hoặc đổi tên/chuyển vào), chủ động quét các file đã có sẵn bên trong. Xem docs/fsw-thu-muc-con-linux.md.</remarks>
 public sealed class FileSystemWatcherSource : IFileChangeSource
 {
-    private readonly List<FileSystemWatcher> _watchers = [];
+    // [Thay đổi] GĐ3: List → Dictionary theo thư mục gốc, để Unwatch đúng watcher của 1 thư mục (R6)
+    private readonly Dictionary<string, FileSystemWatcher> _watchers = [];
     private readonly Lock _lock = new();
 
     // [Thay đổi] Bước 7: các sự kiện giờ đến từ 2 nơi (luồng watcher + luồng quét thư mục mới chạy nền). Khoá này bắt chúng báo LẦN LƯỢT,
@@ -29,8 +33,9 @@ public sealed class FileSystemWatcherSource : IFileChangeSource
     public event Action<string, bool, Exception>? Failed;
 
     /// <inheritdoc/>
-    public void Watch(string folder, IEnumerable<string> extensions)
+    public void Watch(string folder, IEnumerable<string> extensions, WatchExclusion? exclusion = null)
     {
+        var excl = exclusion ?? WatchExclusion.None;
         var watcher = new FileSystemWatcher(folder)
         {
             // [Thay đổi] Nhóm D2 - mặc định FileSystemWatcher chỉ theo dõi ĐÚNG 1 cấp thư mục, bỏ sót mọi
@@ -46,62 +51,87 @@ public sealed class FileSystemWatcherSource : IFileChangeSource
         // So đuôi không phân biệt hoa/thường (".TXT" = ".txt") cho đồng nhất Windows/Linux — trước đây Linux phân biệt.
         var wanted = new HashSet<string>(extensions, StringComparer.OrdinalIgnoreCase);
         bool Matches(string path) => wanted.Contains(Path.GetExtension(path));
+        // [Thay đổi] GĐ3 (3.2): sự kiện bên trong thư mục bị loại trừ → bỏ
+        bool Excluded(string path, bool isDirectory) => excl.IsExcludedPath(folder, path, isDirectory);
 
         watcher.Created += (_, e) =>
         {
-            if (Directory.Exists(e.FullPath)) RescanNewDirectory(e.FullPath, wanted);
-            else if (Matches(e.FullPath)) RaiseChanged(e.FullPath);
+            if (Directory.Exists(e.FullPath))
+            {
+                if (!Excluded(e.FullPath, isDirectory: true)) RescanNewDirectory(e.FullPath, wanted, excl);
+            }
+            else if (Matches(e.FullPath) && !Excluded(e.FullPath, isDirectory: false)) RaiseChanged(e.FullPath);
         };
         watcher.Changed += (_, e) =>
         {
             // Thư mục cũng phát Changed khi nội dung bên trong đổi → bỏ qua (file bên trong đã có sự kiện riêng)
-            if (Matches(e.FullPath) && !Directory.Exists(e.FullPath)) RaiseChanged(e.FullPath);
+            if (Matches(e.FullPath) && !Excluded(e.FullPath, isDirectory: false) && !Directory.Exists(e.FullPath)) RaiseChanged(e.FullPath);
         };
         // [Thay đổi] Nhiều trình soạn thảo (VD VS Code) "tạo file mới" bằng cách ghi ra file tạm rồi ĐỔI TÊN thành tên thật — thao tác đó
         // chỉ phát sự kiện Renamed (không có Created/Changed). Đường dẫn mới là file cần quét; đường dẫn cũ coi như bị xoá.
         watcher.Renamed += (_, e) =>
         {
+            // [Thay đổi] GĐ3 (R4): đường dẫn cũ LUÔN báo FileDeleted (kể cả thư mục, kể cả file sai đuôi) — người nghe tự xoá bản ghi
+            // của đường dẫn đó và mọi thứ bên dưới nó
+            if (!Excluded(e.OldFullPath, isDirectory: false)) RaiseDeleted(e.OldFullPath);
             // [Thay đổi] Bước 7: đổi tên/chuyển 1 THƯ MỤC vào → mọi file bên trong có đường dẫn mới → quét lại cả thư mục.
-            // (Đường dẫn cũ của từng file không báo FileDeleted vì thư mục cũ đã không còn để liệt kê — FileDeleted hiện chưa ai xử lý, R4.)
             if (Directory.Exists(e.FullPath))
             {
-                RescanNewDirectory(e.FullPath, wanted);
+                if (!Excluded(e.FullPath, isDirectory: true)) RescanNewDirectory(e.FullPath, wanted, excl);
                 return;
             }
-            // [Thay đổi] Bước 7: chỉ báo phía nào khớp đuôi (trước đây Filters làm việc này một phần, đổi "a.txt" → "a.bak" vẫn báo a.bak)
-            if (Matches(e.OldFullPath)) RaiseDeleted(e.OldFullPath);
-            if (Matches(e.FullPath)) RaiseChanged(e.FullPath);
+            if (Matches(e.FullPath) && !Excluded(e.FullPath, isDirectory: false)) RaiseChanged(e.FullPath);
         };
+        // [Thay đổi] GĐ3 (R4): không lọc đuôi — có thể là thư mục bị xoá / chuyển ra ngoài (xem IFileChangeSource.FileDeleted)
         watcher.Deleted += (_, e) =>
         {
-            if (Matches(e.FullPath)) RaiseDeleted(e.FullPath);
+            if (!Excluded(e.FullPath, isDirectory: false)) RaiseDeleted(e.FullPath);
         };
         // [Thay đổi] Nhóm D3: nghe sự kiện Error — nếu không đăng ký, lỗi tràn buffer/mất thư mục trôi đi âm thầm
         watcher.Error += (_, e) =>
         {
             var ex = e.GetException();
-            Failed?.Invoke(watcher.Path, ex is InternalBufferOverflowException, ex);
+            Failed?.Invoke(folder, ex is InternalBufferOverflowException, ex);
         };
 
         lock (_lock)
         {
-            _watchers.Add(watcher);
+            if (_watchers.Remove(folder, out var old))
+            {
+                old.Dispose();
+            }
+            _watchers[folder] = watcher;
         }
         watcher.EnableRaisingEvents = true;
+    }
+
+    /// <inheritdoc/>
+    public void Unwatch(string folder)
+    {
+        FileSystemWatcher? watcher;
+        lock (_lock)
+        {
+            _watchers.Remove(folder, out watcher);
+        }
+        if (watcher != null)
+        {
+            watcher.EnableRaisingEvents = false;
+            watcher.Dispose();
+        }
     }
 
     // [Thay đổi] Bước 7: quét bù file có sẵn trong thư mục con vừa xuất hiện (kể cả thư mục cháu chắt bên trong).
     // Chạy nền (Task.Run): thư mục giải nén có thể chứa hàng nghìn file — quét ngay trên luồng watcher sẽ chặn nó, làm sự kiện dồn ứ.
     // File có thể bị báo 2 lần (1 lần từ đây, 1 lần từ sự kiện thường) → vô hại, FileWatcherService gộp lại bằng debounce 300ms theo đường dẫn.
     // Trên Windows bản vá này thừa (hệ điều hành đã báo đủ) nhưng vô hại vì cùng lý do.
-    private void RescanNewDirectory(string directory, HashSet<string> wanted)
+    // [Thay đổi] GĐ3: liệt kê qua WatchExclusion (bỏ thư mục loại trừ, không đi theo symlink, bỏ thư mục không đọc được)
+    private void RescanNewDirectory(string directory, HashSet<string> wanted, WatchExclusion exclusion)
     {
         _ = Task.Run(() =>
         {
             try
             {
-                var options = new EnumerationOptions { RecurseSubdirectories = true, IgnoreInaccessible = true };
-                foreach (var file in Directory.EnumerateFiles(directory, "*", options))
+                foreach (var file in exclusion.EnumerateFiles(directory))
                 {
                     if (_disposed) return;
                     if (wanted.Contains(Path.GetExtension(file))) RaiseChanged(file);
@@ -138,7 +168,7 @@ public sealed class FileSystemWatcherSource : IFileChangeSource
         FileSystemWatcher[] toDispose;
         lock (_lock)
         {
-            toDispose = [.. _watchers];
+            toDispose = [.. _watchers.Values];
             _watchers.Clear();
         }
         foreach (var watcher in toDispose)

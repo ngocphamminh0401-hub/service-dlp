@@ -43,6 +43,15 @@ public static class LinuxHost
         IDataFolderGuard guard = OperatingSystem.IsWindows() ? new NoOpDataFolderGuard() : new LinuxDataFolderGuard();
         builder.Services.AddSingleton(guard);
 
+        // [Thay đổi] GĐ3: nguồn sự kiện inotify riêng (bỏ được thư mục khỏi việc theo dõi, đếm watch, phát hiện tràn hàng đợi — xem
+        // InotifyFileChangeSource). "Watch:Backend": "fsw" → dùng lại FileSystemWatcher của .NET (dự phòng nếu inotify riêng gặp sự cố).
+        // Không đăng ký → Worker tự dùng FileSystemWatcherSource.
+        string backend = builder.Configuration["Watch:Backend"] ?? "inotify";
+        if (OperatingSystem.IsLinux() && !string.Equals(backend, "fsw", StringComparison.OrdinalIgnoreCase))
+        {
+            builder.Services.AddSingleton<IFileChangeSource, InotifyFileChangeSource>();
+        }
+
         // File log là kênh log CHÍNH (journald trên Ubuntu 16.04/CentOS 7 mặc định không lưu bền — mục 4.1). Log chứa đường dẫn file của
         // mọi người dùng (R7) → thư mục log khoá giống thư mục dữ liệu.
         CreateFolder(layout.LogFolder, mode);
@@ -93,13 +102,21 @@ public static class LinuxHost
 
     // Chèn /etc/dlp-service/appsettings.json NGAY TRƯỚC nguồn biến môi trường: thắng appsettings.json đi kèm bản build, nhưng vẫn THUA
     // biến môi trường và tham số dòng lệnh (giữ đúng thứ tự ưu tiên chuẩn của .NET — để systemd Environment= / test ghi đè được).
-    private static void AddSystemConfigFile(ConfigurationManager configuration, string path)
+    // [Thay đổi] GĐ3 (sửa lỗi của GĐ2, tìm ra khi chạy kịch bản): .NET nạp biến môi trường HAI lần — nhóm "DOTNET_*" ở ĐẦU danh sách (cấu hình
+    // của host) và nhóm không tiền tố ở GẦN CUỐI. Bản cũ chèn trước nguồn biến môi trường ĐẦU TIÊN → /etc nằm trước cả appsettings.json đi
+    // kèm → mọi giá trị trong /etc bị ghi đè (chỉ "thắng" được những mục mà file đi kèm không có, VD mảng Watch:Folders rỗng).
+    // Nay chèn trước nguồn biến môi trường CUỐI CÙNG: sau appsettings*.json, trước biến môi trường + dòng lệnh.
+    internal static void AddSystemConfigFile(IConfigurationBuilder configuration, string path)
     {
-        var sources = ((IConfigurationBuilder)configuration).Sources;
-        int index = 0;
-        while (index < sources.Count && sources[index] is not EnvironmentVariablesConfigurationSource)
+        var sources = configuration.Sources;
+        int index = sources.Count;
+        for (int i = sources.Count - 1; i >= 0; i--)
         {
-            index++;
+            if (sources[i] is EnvironmentVariablesConfigurationSource)
+            {
+                index = i;
+                break;
+            }
         }
         var json = new ConfigurationBuilder().AddJsonFile(path, optional: true, reloadOnChange: false).Sources[0];
         sources.Insert(index, json);

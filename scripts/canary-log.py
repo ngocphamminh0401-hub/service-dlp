@@ -90,6 +90,11 @@ def run_once(dll, level, seconds):
 
         scanned = texts["log"].count("phát hiện")
         failures = []
+        # [Thay đổi] GĐ3: chắc chắn mức log ĐÃ áp dụng — dòng chi tiết từng chỗ khớp chỉ có ở Debug. (Lỗi GĐ2: /etc/appsettings.json bị
+        # appsettings.json đi kèm ghi đè → lần chạy "Debug" thực ra chạy ở Information mà bài test vẫn PASS.)
+        has_detail = " tại vị trí " in texts["log"]
+        if (level == "Debug") != has_detail:
+            failures.append(f"{level}: mức log không có hiệu lực (dòng chi tiết Debug {'có' if has_detail else 'không có'})")
         for name, value in CANARIES.items():
             for where, text in texts.items():
                 if value in text:

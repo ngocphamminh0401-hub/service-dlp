@@ -9,6 +9,15 @@ Cập nhật khi thêm/xoá file, không cần cập nhật khi chỉ sửa logi
 |---|---|---|
 | FileWatcherService.cs | FileWatcherService | Theo dõi thư mục (kể cả thư mục con; mọi đuôi `FileReaderService` hỗ trợ) bằng `FileSystemWatcher`, debounce 300ms, giới hạn số file xử lý cùng lúc (`Watch:MaxConcurrency`, mặc định 6, `SemaphoreSlim`), quét file có sẵn khi khởi động, bỏ qua file nội dung không đổi (hash SHA256), quét bù khi buffer tràn (`OnWatcherError`); gọi Reader → Scanner → Engine rồi log kết quả; có rule timeout thì log "CHƯA KẾT LUẬN ĐƯỢC", không gắn mức |
 | WatchFolderPatterns.cs | WatchFolderPatterns | *(GĐ2, R8)* Mở rộng mẫu `Watch:Folders` có `*`/`?` từng cấp (VD `/home/*/Documents`) thành thư mục có thật lúc khởi động; không hỗ trợ `**` |
+| WatchOptions.cs | WatchOptions | *(GĐ3)* Tuỳ chọn theo dõi: loại trừ thư mục, chu kỳ đối soát / làm mới mẫu / metric, thời gian chờ theo dõi lại (R6) |
+
+## Platform/ *(Core — interface nền tảng + bản trung lập)*
+| File | Class | Việc chính |
+|---|---|---|
+| IFileChangeSource.cs | IFileChangeSource | Nguồn sự kiện file: `FileChanged`, `FileDeleted` (GĐ3: mọi đường dẫn biến mất, có thể là thư mục), `Failed`; `Watch(folder, ext, exclusion)`, `Unwatch` |
+| FileSystemWatcherSource.cs | FileSystemWatcherSource | Nguồn bằng `FileSystemWatcher` (Windows; dự phòng Linux `Watch:Backend=fsw`) |
+| WatchExclusion.cs | WatchExclusion | *(GĐ3)* Bỏ thư mục ẩn / theo tên khi theo dõi + quét; liệt kê không theo symlink, bỏ thư mục không đọc được |
+| IWatchStatistics.cs | IWatchStatistics | *(GĐ3)* Số watch / giới hạn / lỗi / tràn / sự kiện thô cho metric |
 
 ## Reading/
 | File | Class | Việc chính |
@@ -130,6 +139,7 @@ Tích hợp Tika native (tika_native.dll biên dịch bằng GraalVM). Cấu hì
 | LinuxDataFolderGuard.cs | LinuxDataFolderGuard | `IDataFolderGuard`: `File.SetUnixFileMode` — thư mục 0700, thư mục con 0700, file có sẵn 0600 (không theo symlink) |
 | LinuxAppLayout.cs | LinuxAppLayout, LinuxLayoutMode | `IAppLayout` 2 chế độ: **System** (`/etc/dlp-service/rules`, `/var/lib/dlp-service/dlp.db`, `/var/log/dlp-service`) và **Portable** (cạnh file chạy, như Windows) |
 | LinuxHost.cs | LinuxHost | `AddLinuxPlatform()`: `AddSystemd()`, chọn chế độ (`DLP_LAYOUT`, hoặc tự nhận khi chạy từ `/opt/dlp-service`), nạp `/etc/dlp-service/appsettings.json` (thua biến môi trường/dòng lệnh), đăng ký 3 adapter, khoá + mở file log. `BuildExplainConfiguration()` cho lệnh `explain` |
+| InotifyFileChangeSource.cs | InotifyFileChangeSource | *(GĐ3)* `IFileChangeSource` + `IWatchStatistics` gọi thẳng inotify (P/Invoke libc): không gắn watch cho thư mục loại trừ, `IN_CLOSE_WRITE`/`IN_MOVED_TO` cho file, gắn watch + quét bù thư mục mới, gỡ watch khi thư mục bị xoá/chuyển đi, `IN_Q_OVERFLOW` → quét bù, gốc mất → `Failed`; đếm watch/lỗi/tràn/sự kiện thô |
 
 ## DlpService.Host.Linux/ *(GĐ2 — host Linux, file chạy `dlp-service`)*
 | File | Class | Việc chính |
@@ -153,6 +163,7 @@ Tích hợp Tika native (tika_native.dll biên dịch bằng GraalVM). Cấu hì
 | uninstall-service.ps1 | Dừng service + `sc.exe delete` |
 | snapshot-ket-qua.py | Chụp kết quả quét (DB → TSV) để so trước/sau hoặc Linux ↔ Windows; trên Linux mặc định dùng host Linux + `~/dlp-rawdata` |
 | canary-log.py | *(GĐ2, R7)* Chạy host Linux trên file chứa giá trị đánh dấu, kiểm không lộ (nguyên văn / một phần) trong log, console, DB — ở mức Information và Debug |
+| watcher-scenarios.py | *(GĐ3)* Chạy host Linux qua kịch bản GĐ3 (tạo/sửa/đổi tên/xoá/chuyển, ghi dở, tải về, giải nén N file, xoá+tạo lại Documents, người dùng mới, nhiều thư mục, CPU rảnh, độ trễ) và chấm PASS/FAIL |
 
 ## tools/perf/
 | File | Việc chính |

@@ -1,5 +1,9 @@
 # Mất sự kiện file trong thư mục con mới trên Linux — phân tích và so sánh phương án
 
+> **Cập nhật GĐ3 (06/11/2026):** đã làm **A + C + D** — nguồn inotify riêng `InotifyFileChangeSource` (phương án D, vẫn kèm quét bù A)
+> và quét đối soát định kỳ (C, `Watch:ReconcileIntervalMinutes`). Lý do làm D sớm: `FileSystemWatcher` không bỏ được thư mục khỏi việc
+> theo dõi nên không đáp ứng yêu cầu "bỏ thư mục ẩn" của GĐ3. Kết quả đo: `docs/bao-cao-gd3-watcher-linux.md`.
+
 > Bước 7 tách lõi (06/11/2026). Liên quan: `DlpService.Core/Platform/FileSystemWatcherSource.cs`,
 > `DlpService.Tests/Platform/FileChangeSourceContractTests.cs`, `docs/nghien-cuu-chuyen-doi-linux.md` (mục 3.6).
 

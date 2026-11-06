@@ -20,7 +20,10 @@ public enum ProcessOutcome
     /// <summary>Không đổi so với lần quét trước → bỏ qua.</summary>
     Unchanged,
     /// <summary>Đọc file thất bại.</summary>
-    Failed
+    Failed,
+    /// <summary>[Thay đổi] GĐ3 (3.4): file bị sửa TRONG LÚC đang đọc (size/mtime sau khi đọc khác trước khi đọc) → kết quả không đáng tin,
+    /// KHÔNG ghi DB; nơi gọi phải xử lý lại sau. Linux không có khoá file bắt buộc nên chuyện đọc trúng file đang ghi dở dễ xảy ra hơn Windows.</summary>
+    ChangedDuringRead
 }
 
 /// <summary>Xử lý 1 file: đọc, quét, phân loại và ghi kết quả. Gọi được từ nhiều luồng cùng lúc (việc giới hạn số luồng do bên gọi lo).</summary>
@@ -44,6 +47,20 @@ public sealed class FileProcessor
     // Hash nội dung lần quét gần nhất theo từng file: nhận ra nhiều sự kiện watcher rời rạc cùng trỏ tới 1 lần lưu file thực tế.
     // ConcurrentDictionary vì nhiều Task debounce và lượt quét khởi động có thể cùng xử lý.
     private readonly ConcurrentDictionary<string, string> _lastContentHash = new();
+
+    /// <summary>[Thay đổi] GĐ3 (R4): quên hash trong RAM của đường dẫn này và mọi đường dẫn bên dưới nó (file/thư mục đã bị xoá).
+    /// Trước đây dict này chỉ phình thêm theo mọi đường dẫn từng thấy.</summary>
+    public void Forget(string path)
+    {
+        string prefix = Path.TrimEndingDirectorySeparator(path) + Path.DirectorySeparatorChar;
+        foreach (var key in _lastContentHash.Keys)
+        {
+            if (string.Equals(key, path, _pathPolicy.Comparison) || key.StartsWith(prefix, _pathPolicy.Comparison))
+            {
+                _lastContentHash.TryRemove(key, out _);
+            }
+        }
+    }
 
     public FileProcessor(FileReaderService fileReader, RegexScanner scanner, ClassificationEngine engine, ILogger logger,
         RouterOptions routerOptions, ResultStore? store, EscalationOptions escalation, FileConfidenceScorer? fileConfidence,
@@ -97,6 +114,18 @@ public sealed class FileProcessor
         // [Thay đổi] Mở rộng định dạng: TryReadTextFile → TryReadFile (tự chọn extractor theo đuôi file)
         var result = _fileReader.TryReadFile(filePath);
         readMs = Lap(ref lastMark); // [Thay đổi] Đo hiệu năng: trích text
+
+        // [Thay đổi] GĐ3 (3.4): so size/mtime SAU khi đọc với TRƯỚC khi đọc — khác nhau = có chương trình ghi vào file đúng lúc đang đọc
+        // (copy file lớn, trình soạn thảo đang lưu) → nội dung vừa đọc có thể là nửa cũ nửa mới. Không kết luận, không ghi DB.
+        if (exists && result.Success)
+        {
+            var after = new FileInfo(filePath);
+            if (!after.Exists || after.Length != size || after.LastWriteTimeUtc != mtimeUtc)
+            {
+                _logger.LogDebug("[FileWatcher] {filePath}: file thay đổi trong lúc đọc — sẽ xử lý lại", filePath);
+                return ProcessOutcome.ChangedDuringRead;
+            }
+        }
         if (result.Success)
         {
             string content = result.Content ?? string.Empty;

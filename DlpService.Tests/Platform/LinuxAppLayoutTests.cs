@@ -78,3 +78,36 @@ public class LinuxAppLayoutTests
         Assert.Contains(LinuxHost.LayoutVariable, ex.Message);
     }
 }
+
+/// <summary>[Thay đổi] GĐ3: thứ tự ưu tiên cấu hình của chế độ System — /etc thắng appsettings.json đi kèm, thua biến môi trường + dòng lệnh.
+/// (Lỗi của GĐ2: /etc bị chèn trước cả file đi kèm nên mọi giá trị trong /etc bị ghi đè.)</summary>
+public sealed class LinuxHostConfigOrderTests : IDisposable
+{
+    private readonly string _dir = Path.Combine(Path.GetTempPath(), "dlp-cfg-" + Guid.NewGuid().ToString("N"));
+
+    public LinuxHostConfigOrderTests() => Directory.CreateDirectory(_dir);
+
+    public void Dispose()
+    {
+        try { Directory.Delete(_dir, recursive: true); } catch (IOException) { }
+    }
+
+    [Fact]
+    public void Etc_thang_file_di_kem_nhung_thua_dong_lenh()
+    {
+        File.WriteAllText(Path.Combine(_dir, "appsettings.json"), """{ "A": "di-kem", "B": "di-kem", "C": "di-kem" }""");
+        string etc = Path.Combine(_dir, "etc.json");
+        File.WriteAllText(etc, """{ "A": "etc", "B": "etc" }""");
+        var builder = Microsoft.Extensions.Hosting.Host.CreateApplicationBuilder(new Microsoft.Extensions.Hosting.HostApplicationBuilderSettings
+        {
+            ContentRootPath = _dir,
+            Args = ["--B=dong-lenh"],
+        });
+
+        LinuxHost.AddSystemConfigFile(builder.Configuration, etc);
+
+        Assert.Equal("etc", builder.Configuration["A"]);        // /etc ghi đè file đi kèm
+        Assert.Equal("dong-lenh", builder.Configuration["B"]);  // dòng lệnh ghi đè /etc
+        Assert.Equal("di-kem", builder.Configuration["C"]);     // /etc không có → giữ file đi kèm
+    }
+}
