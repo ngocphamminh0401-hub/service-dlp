@@ -4,7 +4,7 @@
 using System.Runtime.Versioning;
 using DlpService.Platform;
 
-namespace DlpService.Platform;
+namespace DlpService.Platform.Windows;
 
 /// <summary>Đăng ký các thành phần dành riêng cho Windows vào host.</summary>
 public static class WindowsHost

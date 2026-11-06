@@ -1,9 +1,9 @@
 // [Thay đổi] File mới (kế hoạch tách lõi, bước 4): adapter Windows của IDataFolderGuard — bọc DataFolderSecurity (ACL) sẵn có, không đổi logic.
 // Đây là phần chỉ host Windows được dùng; lõi không tham chiếu lớp này.
 using System.Runtime.Versioning;
-using DlpService.Storage;
 
-namespace DlpService.Platform;
+
+namespace DlpService.Platform.Windows;
 
 /// <summary>Khoá thư mục bằng ACL Windows: chỉ SYSTEM, Administrators và tài khoản đang chạy process.</summary>
 [SupportedOSPlatform("windows")]

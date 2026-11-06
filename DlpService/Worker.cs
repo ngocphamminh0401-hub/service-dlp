@@ -4,7 +4,7 @@ using DlpService.Scanning; // [Thay đổi] để dùng RuleLoader và RegexScan
 using DlpService.Watching;
 using DlpService.Classification;
 using DlpService.Storage; // [Thay đổi] Ghi finding + scan_result
-using DlpService.Llm; // [Thay đổi] mục 4.12 - Worker điều phối job LLM
+using DlpService.Pipeline; // [Thay đổi] Tách lõi bước 5: IJobDispatchLoop
 using DlpService.Reading;
 using DlpService.Reading.Native; // [Thay đổi] Tika native: cấu hình + vòng đời thư viện native
 
@@ -14,7 +14,8 @@ namespace DlpService;
 // [Thay đổi] Router ba vùng: nhận thêm IConfiguration (DI tự truyền) để đọc ngưỡng T_high/T_low từ appsettings.json
 // [Thay đổi] Tách lõi bước 1: nhận thêm IAppLayout (DI tự truyền) — mọi thư mục rule/DB/model lấy từ đây thay vì ghép AppContext.BaseDirectory
 // [Thay đổi] Tách lõi bước 4: + IPathPolicy, IDataFolderGuard (adapter theo hệ điều hành do host đăng ký; DI tự truyền)
-public class Worker(ILogger<Worker> logger, IConfiguration configuration, IAppLayout layout, IPathPolicy pathPolicy, IDataFolderGuard dataFolderGuard) : BackgroundService
+public class Worker(ILogger<Worker> logger, IConfiguration configuration, IAppLayout layout, IPathPolicy pathPolicy, IDataFolderGuard dataFolderGuard,
+    IJobDispatchLoop? dispatchLoop = null) : BackgroundService // [Thay đổi] Tách lõi bước 5: vòng điều phối job (LLM) do host đăng ký, có thể không có
 {
     // [Sửa lỗi] Watcher bị GC thu hồi khi service rảnh: trước đây FileWatcherService chỉ là BIẾN CỤC BỘ trong ExecuteAsync và không
     // được dùng sau "await Task.WhenAll" → bản Release không giữ nó trong state machine async; FileSystemWatcher của .NET chỉ tự giữ
@@ -192,8 +193,9 @@ public class Worker(ILogger<Worker> logger, IConfiguration configuration, IAppLa
 
         // [Thay đổi] mục 4.12: vòng lặp riêng cho việc gửi job LLM (10 giây/lần) — tách khỏi vòng dọn dẹp 1 phút để
         // job vùng xám được xử lý sớm hơn, không phải chờ tới chu kỳ dọn dẹp.
-        Task llmLoop = store != null && llmEnabled // [Thay đổi] Tách lõi bước 2: LLM tắt thì không dựng client/dispatcher
-            ? RunLlmDispatchLoopAsync(store, scanner, configuration, stoppingToken)
+        // [Thay đổi] Tách lõi bước 5: chạy vòng do host cung cấp (LLM) qua IJobDispatchLoop; host không đăng ký (Linux) hoặc LLM tắt thì bỏ qua
+        Task llmLoop = store != null && llmEnabled && dispatchLoop != null
+            ? dispatchLoop.RunAsync(store, scanner, stoppingToken)
             : Task.CompletedTask;
 
         async Task RunMainLoopAsync()
@@ -235,69 +237,6 @@ public class Worker(ILogger<Worker> logger, IConfiguration configuration, IAppLa
 
             // [Thay đổi] Tika native: huỷ parser và isolate GraalVM khi service dừng (an toàn khi chưa bật/chưa nạp)
             TikaNativeRuntime.Shutdown();
-        }
-    }
-
-    // [Thay đổi] mục 4.12 - Worker điều phối job: dựng GuardedInferenceClient + LlmJobDispatcher 1 lần, lặp mỗi 10
-    // giây. Luôn "await" TryDispatchOnceAsync trước khi lặp lại → tự nhiên chỉ có 1 job chạy đồng thời (mục 4.12:
-    // "1 job đồng thời"), không cần khoá/semaphore riêng.
-    private async Task RunLlmDispatchLoopAsync(ResultStore store, RegexScanner scanner,
-        IConfiguration configuration, CancellationToken stoppingToken)
-    {
-        string pipeName = configuration["Llm:PipeName"] ?? "dlp-llm";
-        // [Thay đổi] mục 5.5: đường dẫn exe LLM host thật (vd DlpLlmHost.exe) để client tự kiểm tra sau khi kết
-        // nối pipe — chưa cấu hình (chưa triển khai DlpLlmHost thật thay DlpFakeLlm) thì bỏ qua kiểm tra, KHÔNG ép
-        // buộc, tránh chặn luồng dev/test hiện tại.
-        string? serverExePath = configuration["Llm:ServerExePath"];
-        var trustPolicy = serverExePath != null
-            ? new PipeServerTrustPolicy(serverExePath, configuration.GetValue("Llm:RequireServerSignature", false))
-            : null;
-        var dispatcherOptions = new LlmJobDispatcherOptions
-        {
-            TokenBudget = Math.Max(200, configuration.GetValue("Llm:TokenBudget", 2000)),
-            JobDeadline = TimeSpan.FromSeconds(Math.Max(1, configuration.GetValue("Llm:JobDeadlineSeconds", 60)))
-        };
-        var idleOptions = new MachineIdleOptions
-        {
-            MaxCpuPercent = configuration.GetValue("Llm:MaxCpuPercent", 50.0),
-            MinBatteryPercent = configuration.GetValue("Llm:MinBatteryPercent", 20.0)
-        };
-
-        using var inferenceClient = InferenceClient.ConnectNamedPipe(pipeName, trustPolicy);
-        var breaker = new CircuitBreaker();
-        var guardedClient = new GuardedInferenceClient(inferenceClient, breaker);
-        var idleChecker = new MachineIdleChecker(idleOptions);
-        var fileReader = new FileReaderService();
-        var dispatcher = new LlmJobDispatcher(store, fileReader, scanner, guardedClient, idleChecker, dispatcherOptions, logger);
-
-        logger.LogInformation("[LLM] Worker điều phối job: pipe={pipe}, ngân sách {budget} token, deadline {deadline}s, CPU ≤ {cpu}%, pin ≥ {battery}%",
-            pipeName, dispatcherOptions.TokenBudget, dispatcherOptions.JobDeadline.TotalSeconds, idleOptions.MaxCpuPercent, idleOptions.MinBatteryPercent);
-
-        while (!stoppingToken.IsCancellationRequested)
-        {
-            try
-            {
-                string outcome = await dispatcher.TryDispatchOnceAsync(stoppingToken);
-                if (outcome != "no_job" && !outcome.StartsWith("not_idle", StringComparison.Ordinal) && outcome != "circuit_open")
-                {
-                    logger.LogInformation("[LLM] {outcome}", outcome);
-                }
-                else if (logger.IsEnabled(LogLevel.Debug))
-                {
-                    logger.LogDebug("[LLM] {outcome}", outcome);
-                }
-            }
-            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
-            {
-                break;
-            }
-            catch (Exception ex)
-            {
-                // [Thay đổi] Nguyên tắc P3: lỗi ở vòng điều phối LLM không được làm dừng cả service
-                logger.LogWarning(ex, "[LLM] Lỗi vòng điều phối job, thử lại ở lượt sau");
-            }
-
-            await Task.Delay(TimeSpan.FromSeconds(10), stoppingToken);
         }
     }
 

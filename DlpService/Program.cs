@@ -1,7 +1,10 @@
 using DlpService;
 using DlpService.Diagnostics;
+using DlpService.Llm;
 using DlpService.Logging;
+using DlpService.Pipeline;
 using DlpService.Platform;
+using DlpService.Platform.Windows; // [Thay đổi] Tách lõi bước 5: adapter riêng của Windows
 
 // [Thay đổi] Lệnh chẩn đoán "explain <file_id>": chạy tay từ console, KHÔNG khởi động Windows Service/Worker —
 // chỉ đọc DB rồi thoát ngay, đúng ý "lệnh chẩn đoán" (không phải 1 chế độ chạy nền mới).
@@ -26,6 +29,8 @@ builder.AddWindowsPlatform();
 builder.Logging.AddProvider(new FileLoggerProvider(layout.LogFolder));
 builder.Services.AddSingleton(layout);
 
+// [Thay đổi] Tách lõi bước 5: vòng điều phối job LLM là phần RIÊNG của host Windows → host đăng ký; Worker (lõi) chỉ biết IJobDispatchLoop
+builder.Services.AddSingleton<IJobDispatchLoop, LlmDispatchLoop>();
 builder.Services.AddHostedService<Worker>();
 
 var host = builder.Build();

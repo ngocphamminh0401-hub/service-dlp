@@ -7,13 +7,18 @@
     <UserSecretsId>dotnet-DlpService-6ad53db3-d5d6-453c-adcb-6df54e8ec239</UserSecretsId>
   </PropertyGroup>
 
+  <!-- [Thay đổi] Tách lõi bước 5: gói của LÕI (chạy được trên mọi hệ điều hành) — sẽ chuyển sang DlpService.Core ở bước 6 -->
   <ItemGroup>
     <PackageReference Include="DocumentFormat.OpenXml" Version="3.5.1" />
     <PackageReference Include="ExcelDataReader" Version="3.9.0" />
     <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.12" />
     <PackageReference Include="Microsoft.Extensions.Hosting" Version="10.0.12" />
-    <PackageReference Include="Microsoft.Extensions.Hosting.WindowsServices" Version="10.0.12" />
     <PackageReference Include="PdfPig" Version="0.1.11" />
+  </ItemGroup>
+
+  <!-- [Thay đổi] Tách lõi bước 5: gói RIÊNG của host Windows / LLM — ở lại DlpService, KHÔNG được chuyển sang Core -->
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.Hosting.WindowsServices" Version="10.0.12" />
     <!-- [Thay đổi] mục 5 - Client gRPC nói chuyện với LLM process qua Named Pipe (Llm/InferenceClient.cs) -->
     <PackageReference Include="Grpc.Net.Client" Version="2.66.0" />
     <PackageReference Include="Grpc.Tools" Version="2.66.0" PrivateAssets="All" />

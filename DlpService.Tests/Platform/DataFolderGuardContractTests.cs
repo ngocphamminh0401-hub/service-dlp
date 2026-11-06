@@ -2,6 +2,7 @@
 // tài khoản chạy service vẫn tạo/đọc/ghi được file trong thư mục (nếu không DB sẽ không mở được). Việc "người khác bị chặn" không kiểm
 // được trong test đơn tài khoản — phần đó kiểm bằng tay khi cài service thật (docs: kiểm tra ACL).
 using DlpService.Platform;
+using DlpService.Platform.Windows;
 
 namespace DlpService.Tests.Platform;
 
