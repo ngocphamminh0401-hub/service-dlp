@@ -1,0 +1,72 @@
+{
+  "id": "income_001",
+  "name": "FIN-006 Thông tin lương / thu nhập / thù lao",
+  "category": "financial",
+  "level": "CONFIDENTIAL",
+  "weight": 0.82,
+  "priority": 52,
+  "tags": ["financial", "income", "salary", "payroll", "hr_data", "financial_personal"],
+  "enabled": true,
+  "notes": [
+    "FIN-006 - Thông tin lương/thu nhập/thù lao. Thuộc dữ liệu cá nhân nhạy cảm theo Nghị định 13/2023/NĐ-CP. Số tiền xuất hiện rất phổ biến (giá sản phẩm, hóa đơn, báo giá) nên pattern PHẢI đi kèm keyword lương/thu nhập để tránh FP.",
+    "Regex bắt đầu bằng \\\\d[\\\\d.,]* (không phải [\\\\d.,]+) để tránh bug 'hạ bậc lương, đình chỉ công việc...' (câu xử lý vi phạm) khớp nhầm thành 'lương' + số tiền chỉ vì có 1 dấu phẩy/chấm đơn lẻ.",
+    "keyword_logic.min_secondary=1: bắt buộc có ít nhất 1 keyword phụ (BHXH, phiếu lương, hợp đồng lao động...) để phân biệt dữ liệu lương cá nhân với bảng ngân sách phòng ban chung chung.",
+    "required_corroboration_tags=[personal_identifier] + strict_tags_only=true thay cho min_confidence_bypass: khoảng lương QUẢNG CÁO trong tin tuyển dụng công khai đạt confidence rất cao (0.97-1.00) do nhiều keyword mạnh xung quanh, nên ngưỡng confidence không chặn được — chỉ có ĐỊNH DANH CÁ NHÂN (họ tên/CCCD/ngày sinh) đi kèm mới phân biệt được 'thông báo lương thật của 1 người' với 'tin tuyển dụng chung'.",
+    "Đánh đổi đã biết: 283/317 (89%) match income_001 thật có personal_identifier nên không ảnh hưởng; 30/34 còn lại vẫn CONFIDENTIAL nhờ rule PII/hợp đồng khác corroborate ở mức file; chỉ ~4/6344 file (thông báo lương qua chat nội bộ không trích xuất được tên/CCCD gần đó) bị hạ nhầm xuống INTERNAL — đổi lấy 59 file PUBLIC (tin tuyển dụng) không còn bị đẩy sai lên CONFIDENTIAL.",
+    "negation_filter: pattern_1 cũng khớp CHÍNH SÁCH LƯƠNG CÔNG KHAI (mức lương tối thiểu vùng, nghị định/thông tư nhà nước) — hạ ngay về fallback_level (INTERNAL) khi có ngữ cảnh chính sách công khai gần đó, bất kể corroboration khác."
+  ],
+  "patterns": [
+    {
+      "regex": "(?i)(?:lương|thu\\s*nhập|mức\\s*lương|lương\\s*cơ\\s*bản|lương\\s*net|lương\\s*gross|lương\\s*tháng|lương\\s*năm|thu\\s*nhập\\s*ròng|thu\\s*nhập\\s*gộp)\\s*[:=]?\\s*\\d[\\d.,]*\\s*(?:đồng|VND|vnđ|triệu|tr\\.?|nghìn|k\\b)?",
+      "description": "Lương/thu nhập VN + số tiền (VND)",
+      "confidence": 0.85,
+      "context_required": false
+    },
+    {
+      "regex": "(?i)(?:thù\\s*lao|hoa\\s*hồng|mức\\s*thưởng|thưởng\\s*KPI|bonus|commission)\\s*[:=]?\\s*\\d[\\d.,]*\\s*(?:đồng|VND|vnđ|triệu|tr\\.?|%)?",
+      "description": "Thù lao / hoa hồng / thưởng + số tiền",
+      "confidence": 0.82,
+      "context_required": false
+    },
+    {
+      "regex": "(?i)(?:salary|income|wage|compensation|remuneration|pay\\s*rate|annual\\s*salary|monthly\\s*salary)\\s*[:=]?\\s*(?:USD|VND|EUR|GBP)?\\s*\\d[\\d.,]*",
+      "description": "Salary/income tiếng Anh + số tiền",
+      "confidence": 0.82,
+      "context_required": false
+    },
+    {
+      "regex": "(?i)(?:lương|salary|income)\\b.*?(\\d{1,3}(?:[.,]\\d{3})+)",
+      "description": "Số tiền dạng bảng lương (có separator phân nhóm)",
+      "confidence": 0.72,
+      "context_required": true
+    }
+  ],
+  "keywords": {
+    "primary": ["lương", "thu nhập", "salary", "income", "thù lao", "thưởng", "bảng lương", "payroll", "mức lương", "lương net", "lương gross"],
+    "secondary": ["TNCN", "thuế thu nhập cá nhân", "personal income tax", "bảo hiểm xã hội", "BHXH", "hợp đồng lao động", "employment contract", "phiếu lương", "pay slip", "payslip", "bonus", "KPI", "commission", "hoa hồng", "thưởng doanh số"]
+  },
+  "keyword_logic": {
+    "min_secondary": 1
+  },
+  "level_gate": {
+    "require_corroboration": true,
+    "fallback_level": "PUBLIC",
+    "applies_to_patterns": ["pattern_1", "pattern_2", "pattern_3", "pattern_4"],
+    "required_corroboration_tags": ["personal_identifier"],
+    "strict_tags_only": true
+  },
+  "negation_filter": {
+    "window_chars": 60,
+    "trigger_words": ["nghị định", "thông tư", "quy định của nhà nước", "mức lương tối thiểu vùng", "theo luật"],
+    "action": "downgrade_to_gate"
+  },
+  "false_positive_reduction": {
+    "min_context_window": 200,
+    "exclude_if_no_keywords": true
+  },
+  "proximity_window": {
+    "max_chars": 80,
+    "same_sentence_required": true,
+    "keyword_scope": "primary_or_secondary"
+  }
+}

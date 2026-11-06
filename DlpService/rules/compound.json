@@ -1,0 +1,103 @@
+[
+  {
+    "name": "Contract + PII = CONFIDENTIAL",
+    "conditions": ["org_contract", "pii_strong"],
+    "result_level": "CONFIDENTIAL"
+  },
+  {
+    "name": "Credit card + CVV = SECRET (PCI-DSS Req.3.3.1)",
+    "conditions": ["credit_card_001", "cvv"],
+    "result_level": "SECRET",
+    "violation_type": "PCI_DSS_3.3.1",
+    "alert_priority": "CRITICAL"
+  },
+  {
+    "name": "Credentials + Internal IP = SECRET",
+    "conditions": ["credentials", "internal_ip"],
+    "result_level": "SECRET"
+  },
+  {
+    "name": "Contract + Financial = CONFIDENTIAL",
+    "conditions": ["org_contract", "financial_personal"],
+    "result_level": "CONFIDENTIAL"
+  },
+  {
+    "name": "VNPT email + Classified SECRET doc = SECRET",
+    "conditions": ["vnpt_email", "classified_doc_001"],
+    "min_component_level": "SECRET",
+    "result_level": "SECRET"
+  },
+  {
+    "name": "VNPT email + Classified CONFIDENTIAL doc = CONFIDENTIAL",
+    "conditions": ["vnpt_email", "classified_doc_002"],
+    "result_level": "CONFIDENTIAL"
+  },
+  {
+    "name": "Phone + Financial = CONFIDENTIAL",
+    "conditions": ["pii_phone", "financial_personal"],
+    "result_level": "CONFIDENTIAL"
+  },
+  {
+    "name": "Location Tracking + Financial = SECRET",
+    "conditions": ["pii_location_tracking", "financial_personal"],
+    "min_component_level": "CONFIDENTIAL",
+    "result_level": "SECRET"
+  },
+  {
+    "name": "Health + Insurance Context = SECRET",
+    "conditions": ["pii_health", "org_insurance_context"],
+    "min_component_level": "CONFIDENTIAL",
+    "result_level": "SECRET"
+  },
+  {
+    "name": "Ethnicity/Religion + Identity (CCCD) = SECRET",
+    "conditions": ["pii_ethnicity_religion_political", "pii_vn_id"],
+    "min_component_level": "CONFIDENTIAL",
+    "result_level": "SECRET"
+  },
+  {
+    "name": "Ethnicity/Religion + Passport = SECRET",
+    "conditions": ["pii_ethnicity_religion_political", "pii_passport"],
+    "min_component_level": "CONFIDENTIAL",
+    "result_level": "SECRET"
+  },
+  {
+    "name": "Ethnicity/Religion + Social Insurance = SECRET",
+    "conditions": ["pii_ethnicity_religion_political", "pii_social_insurance"],
+    "min_component_level": "CONFIDENTIAL",
+    "result_level": "SECRET"
+  },
+  {
+    "name": "Ethnicity/Religion + Financial = SECRET",
+    "conditions": ["pii_ethnicity_religion_political", "financial_personal"],
+    "min_component_level": "CONFIDENTIAL",
+    "result_level": "SECRET"
+  },
+  {
+    "name": "Ethnicity/Religion + Health = SECRET",
+    "conditions": ["pii_ethnicity_religion_political", "pii_health"],
+    "min_component_level": "CONFIDENTIAL",
+    "exclude_context_patterns": [
+      "(?i)khám\\s*lâm\\s*sàng",
+      "(?i)phiếu\\s*khám\\s*sức\\s*khỏe",
+      "(?i)hồ\\s*sơ\\s*bệnh\\s*án"
+    ],
+    "result_level": "SECRET"
+  },
+  {
+    "name": "PII Aggregation (email + phone + DOB) = CONFIDENTIAL",
+    "conditions": ["pii_email", "pii_phone", "pii_dob"],
+    "result_level": "CONFIDENTIAL"
+  },
+  {
+    "name": "Credentials + Identity = SECRET (account takeover)",
+    "conditions": ["credentials", "pii_vn_id"],
+    "result_level": "SECRET",
+    "violation_type": "ACCOUNT_TAKEOVER_ENABLER"
+  },
+  {
+    "name": "Internal IP + Internal Code = CONFIDENTIAL (network recon)",
+    "conditions": ["org_internal_ip", "org_internal_code"],
+    "result_level": "CONFIDENTIAL"
+  }
+]

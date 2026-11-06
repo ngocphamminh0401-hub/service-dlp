@@ -1,0 +1,62 @@
+{
+  "id": "email_001",
+  "name": "Email",
+  "category": "pii",
+  "level": "INTERNAL",
+  "weight": 0.75,
+  "priority": 45,
+  "tags": ["pii", "email", "contact_info"],
+  "enabled": true,
+  "notes": [
+    "PII-004 - Địa chỉ Email (RFC 5322 simplified). Email là PII theo GDPR và Nghị định 13/2023. Phân loại 2 cấp: email thông thường -> INTERNAL; email nội bộ VNPT/.gov.vn/.edu.vn/.mil.vn -> vẫn INTERNAL nhưng qua override_level riêng (field này chưa được engine đọc, xem ghi chú dưới); email kèm họ tên rõ ràng -> nâng qua compound rule (ngoài phạm vi file này).",
+    "override_level trên pattern_1/2 CHƯA được engine C# đọc (dead field cho tới khi mở rộng PatternDefinition) — hiện mức thực tế lấy từ rule.level (INTERNAL) chung cho mọi pattern, nên email VNPT/nhà nước hiện tại KHÔNG được nâng cao hơn email thường như PDF mô tả.",
+    "Email vai trò/tổ chức (info@, hotline@, support@, no-reply@, admin@, cskh@...) không gắn với 1 cá nhân cụ thể — không phải PII thật. placeholder_exclusion loại HOÀN TOÀN khỏi kết quả (không chỉ hạ level) vì compound rule chỉ build tag từ match thực sự tồn tại trong kết quả. Field này đã được engine C# đọc (Bậc 3 #5): loại trước bước đếm nên email vai trò cũng KHÔNG góp vào volume_escalation.",
+    "volume_escalation: 1 email lẻ chỉ INTERNAL, nhưng danh sách hàng loạt email trong cùng 1 file (leak database khách hàng) là rủi ro khác hẳn — ngưỡng 50->CONFIDENTIAL khớp SCALE_LARGE chung, 200->SECRET là bậc 'mất mát hàng loạt'.",
+    "level_gate: rule chưa từng có gate trước đây — 1 email đứng lẻ trong thông cáo báo chí/tài liệu liên hệ PUBLIC (VD 'Mọi thắc mắc xin liên hệ: nguyenvana@gmail.com') vẫn tự động INTERNAL, là nguồn over-classify PUBLIC lớn thứ 2 toàn ruleset.",
+    "Cả 3 pattern dùng validators:[email_personal] (Scanning/Validation/EmailValidator.cs): loại email sai cấu trúc và HỘP THƯ CHUNG mà blocklist chưa có (tuyendung@, hotro.khachhang@, phongnhansu@, banquanly@, pr@, ir@, research@...). Baseline 28/09: email_001 có mặt trong 83% file PUBLIC bị xếp nhầm Confidential/Restricted, và email trong tài liệu public gần như toàn là hộp thư chung. Là BỘ LỌC, không phải checksum → không tính là bằng chứng cho level_gate (gate vẫn hạ email lẻ về PUBLIC như cũ)."
+  ],
+  "patterns": [
+    {
+      "regex": "[A-Za-z0-9._%+\\-]+@(?:vnpt\\.vn|vnpt-i\\.vn|vnptit\\.vn|vinaphone\\.vn|vnpttechnology\\.vn|vnpt\\.com\\.vn|vnpt-net\\.vn|vnptmedia\\.vn)",
+      "description": "Email nội bộ VNPT (tất cả domain VNPT)",
+      "confidence": 0.98,
+      "context_required": false,
+      "validators": ["email_personal"]
+    },
+    {
+      "regex": "[A-Za-z0-9._%+\\-]+@[A-Za-z0-9.\\-]+\\.(?:gov\\.vn|edu\\.vn|mil\\.vn)",
+      "description": "Email tổ chức nhà nước VN (.gov.vn / .edu.vn / .mil.vn)",
+      "confidence": 0.95,
+      "context_required": false,
+      "validators": ["email_personal"]
+    },
+    {
+      "regex": "[A-Za-z0-9._%+\\-]+@[A-Za-z0-9.\\-]+\\.[A-Za-z]{2,7}",
+      "description": "Email chuẩn (mọi domain) — tổng quát",
+      "confidence": 0.70,
+      "context_required": false,
+      "validators": ["email_personal"]
+    }
+  ],
+  "keywords": {
+    "primary": ["email", "địa chỉ email", "hộp thư", "thư điện tử", "e-mail"],
+    "secondary": ["liên hệ", "liên lạc", "contact", "gửi mail", "inbox", "địa chỉ thư"]
+  },
+  "false_positive_reduction": {
+    "min_context_window": 0,
+    "exclude_if_no_keywords": false
+  },
+  "placeholder_exclusion": {
+    "value_blocklist_patterns": ["(?i)^(noreply|no-reply|no\\.reply|donotreply|do-not-reply|do\\.not\\.reply|mailer-daemon|bounce|info|contact|support|help|admin|administrator|hotline|cskh|dichvu|dịchvụ|thongbao|thông-bao|newsletter|marketing|sales|pr|media|webmaster|postmaster|unsubscribe|listserv|announce|notification|notify|alert|system|robot|bot|press|billing|hr|jobs|careers|feedback|service)@"]
+  },
+  "volume_escalation": {
+    "thresholds": [
+      { "min_count": 50, "escalate_to": "CONFIDENTIAL" },
+      { "min_count": 200, "escalate_to": "SECRET" }
+    ]
+  },
+  "level_gate": {
+    "require_corroboration": true,
+    "fallback_level": "PUBLIC"
+  }
+}

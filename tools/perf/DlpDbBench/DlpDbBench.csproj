@@ -1,0 +1,17 @@
+<!-- [Thay đổi] File mới: đo tốc độ ghi/đọc DB của ResultStore dưới tải song song (giống FileWatcherService khi nhiều file đến
+     cùng lúc), trên DB tạm có sẵn lịch sử. Tham chiếu thẳng DlpService để đo ĐÚNG code của service. -->
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>DlpDbBench</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\..\DlpService\DlpService.csproj" />
+  </ItemGroup>
+
+</Project>

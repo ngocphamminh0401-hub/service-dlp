@@ -1,0 +1,10 @@
+{
+  "resources": [
+    { "glob": "org/apache/poi/schemas/**" },
+    { "glob": "schemaorg_apache_xmlbeans/**" },
+    { "glob": "org/apache/xmlbeans/**" },
+    { "glob": "org/apache/fontbox/**" },
+    { "glob": "org/apache/pdfbox/**" },
+    { "glob": "org/apache/tika/**" }
+  ]
+}

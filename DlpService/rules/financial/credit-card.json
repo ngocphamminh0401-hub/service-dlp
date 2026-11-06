@@ -1,0 +1,7 @@
+{
+  "name": "CreditCard",
+  "pattern": "(?<!\\d)(?:\\d[ -]?){12,18}\\d(?!\\d)",
+  "severity": "High",
+  "validator": "luhn",
+  "enabled": true
+}

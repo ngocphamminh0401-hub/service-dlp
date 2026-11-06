@@ -1,0 +1,60 @@
+{
+  "id": "hr_offer_letter_001",
+  "name": "HR-022 Thư mời nhận việc kèm đãi ngộ cá nhân",
+  "category": "hr",
+  "level": "CONFIDENTIAL",
+  "weight": 0.85,
+  "priority": 85,
+  "tags": ["hr", "offer_letter", "compensation", "candidate_pii"],
+  "enabled": true,
+  "notes": [
+    "HR-022 - Thư mời nhận việc (Offer Letter) kèm mức lương/đãi ngộ cụ thể. Dễ bị phân loại nhầm PUBLIC vì cấu trúc/văn phong gần giống thông báo tuyển dụng công khai. Điểm khác biệt then chốt: thư mời gắn danh tính ỨNG VIÊN CỤ THỂ (Kính gửi Anh/Chị + họ tên) VỚI mức lương/phụ cấp CỤ THỂ bằng số — thỏa thuận đãi ngộ cá nhân, khác tin tuyển dụng đại chúng (JD tuyển dụng không bao giờ có lương cụ thể gắn với 1 cá nhân đã có tên).",
+    "Kiểm chứng trên dữ liệu thật (80 file sub_type thư mời nhận việc): 61/80 đã đúng CONFIDENTIAL sẵn nhờ rule CCCD khác; 16/80 rơi INTERNAL (chỉ khớp rule email); 3/80 không khớp rule nào — xác nhận không phải PII trực tiếp mà là tổ hợp danh tính+lương.",
+    "id dùng hậu tố '_001' (không phải số thứ tự HR-022 trần) để tránh trùng prefix 'hr' khi engine tự tách tiền tố ruleID.",
+    "Corroboration: pattern tiêu đề (HR-022a) một mình không đủ, cần kèm tên ứng viên cụ thể (HR-022b) hoặc số tiền lương cụ thể (HR-022c) trong cùng chunk — trên thư mời thật các pattern này tự nhiên đạt ≥2 lần khớp nên hành vi tương đương ý định gốc."
+  ],
+  "patterns": [
+    {
+      "regex": "(?i)th[ưu]\\s*mời\\s*nhận\\s*việc",
+      "description": "HR-022a Tiêu đề thư mời nhận việc",
+      "confidence": 0.55,
+      "context_required": true
+    },
+    {
+      "regex": "(?i)kính\\s*gửi\\s*(?:anh|chị|ông|bà)\\s+[A-ZÀ-Ỵ][\\wÀ-ỹ]+(?:\\s+[A-ZÀ-Ỵ][\\wÀ-ỹ]+){1,4}",
+      "description": "HR-022b Người nhận thư là ứng viên cụ thể (có họ tên)",
+      "confidence": 0.60,
+      "context_required": true
+    },
+    {
+      "regex": "(?i)(?:mức\\s*lương|lương\\s*(?:cơ\\s*bản|gross|net)?|phụ\\s*cấp|thưởng)\\s*(?:\\([^)]*\\))?\\s*[:\\-]?\\s*\\d{1,3}(?:[.,]\\d{3}){1,3}\\s*(?:VNĐ|đồng|VND)",
+      "description": "HR-022c Số tiền lương/phụ cấp cụ thể",
+      "confidence": 0.90,
+      "context_required": false
+    },
+    {
+      "regex": "(?i)(?:bản\\s*sao\\s*)?(?:CCCD|CMND).{0,80}(?:sơ\\s*yếu\\s*lý\\s*lịch|số\\s*tài\\s*khoản\\s*ngân\\s*hàng)",
+      "description": "HR-022d Yêu cầu hồ sơ cá nhân khi nhận việc",
+      "confidence": 0.70,
+      "context_required": false
+    },
+    {
+      "regex": "(?i)ngày\\s*dự\\s*kiến\\s*bắt\\s*đầu\\s*làm\\s*việc\\s*[:=]?\\s*\\d{1,2}[\\/\\-]\\d{1,2}[\\/\\-]\\d{4}",
+      "description": "HR-022e Ngày bắt đầu làm việc cụ thể",
+      "confidence": 0.65,
+      "context_required": true
+    }
+  ],
+  "keywords": {
+    "primary": ["thư mời nhận việc", "mức lương đề xuất", "mức lương cơ bản", "chế độ đãi ngộ"],
+    "secondary": ["phụ cấp", "thử việc", "phòng nhân sự", "xác nhận đồng ý nhận việc", "sơ yếu lý lịch"]
+  },
+  "level_gate": {
+    "require_corroboration": true,
+    "fallback_level": "INTERNAL"
+  },
+  "false_positive_reduction": {
+    "min_context_window": 100,
+    "exclude_if_no_keywords": true
+  }
+}

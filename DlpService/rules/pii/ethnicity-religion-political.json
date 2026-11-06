@@ -1,0 +1,50 @@
+{
+  "id": "ethnicity_religion_political_001",
+  "name": "PII-010 Dân tộc / Tôn giáo / Đảng viên / Lý lịch chính trị",
+  "category": "pii",
+  "level": "CONFIDENTIAL",
+  "weight": 0.85,
+  "priority": 65,
+  "tags": ["pii", "ethnicity_religion_political", "sensitive_category", "ndctn13"],
+  "enabled": true,
+  "notes": [
+    "PII-010 - Dân tộc/Tôn giáo/Quan điểm chính trị/Đảng viên/Công đoàn (flag ETHNICITY_RELIGION_POLITICAL). GDPR Điều 9 — special category data. Thường gặp trong CV/sơ yếu lý lịch tiếng Việt truyền thống.",
+    "ĐÃ ĐẢO NGƯỢC quyết định ban đầu (giữ CONFIDENTIAL, không tự nâng RESTRICTED) sau khi có dataset hr__* thật: 597/1600 file hr__top_secret đều là hồ sơ nhân viên có TÊN THẬT kết hợp Dân tộc/Tôn giáo + CCCD/tài chính/sức khỏe — đúng mẫu 'combination amplification'. Việc leo thang lên RESTRICTED khi kết hợp identity/financial/health được xử lý qua compound_rules (ngoài phạm vi file này), KHÔNG qua level_gate/volume_escalation trong rule này.",
+    "Thiết kế chống FP: bắt buộc dạng 'Nhãn: giá trị' (giống pattern 'Chẩn đoán:' trong health) — KHÔNG match keyword trần trụi để tránh dính văn bản CSR/chính sách đa dạng chung chung ('chúng tôi tôn trọng đa dạng tôn giáo và dân tộc').",
+    "ĐÃ BỎ pattern văn xuôi không nhãn ('\\b(dân tộc|tôn giáo)\\b'): bắt nhầm câu PHỦ ĐỊNH 'Hồ sơ không chứa trường thông tin về dân tộc, tôn giáo hoặc đảng viên...' — RE2 không hỗ trợ lookbehind nên không loại trừ được tiền tố 'không chứa'. Giữ 4 pattern 'Nhãn: giá trị' (không bị lỗi phủ định vì 'không chứa dân tộc:' không phải cách viết field tự nhiên) là đủ, đúng với mọi ví dụ thật đã khảo sát."
+  ],
+  "patterns": [
+    {
+      "regex": "(?i)dân\\s*tộc\\s*[:=]\\s*\\S+",
+      "description": "Trường Dân tộc (dạng nhãn:giá trị)",
+      "confidence": 0.85,
+      "context_required": false
+    },
+    {
+      "regex": "(?i)tôn\\s*giáo\\s*[:=]\\s*\\S+",
+      "description": "Trường Tôn giáo (dạng nhãn:giá trị)",
+      "confidence": 0.85,
+      "context_required": false
+    },
+    {
+      "regex": "(?i)(?:đảng\\s*viên|tình\\s*trạng\\s*đảng)\\s*[:=]\\s*\\S+",
+      "description": "Trường Đảng viên (dạng nhãn:giá trị)",
+      "confidence": 0.85,
+      "context_required": false
+    },
+    {
+      "regex": "(?i)lý\\s*lịch\\s*chính\\s*trị\\s*[:=]",
+      "description": "Trường Lý lịch chính trị",
+      "confidence": 0.85,
+      "context_required": false
+    }
+  ],
+  "keywords": {
+    "primary": ["dân tộc", "tôn giáo", "đảng viên", "tín ngưỡng", "lý lịch chính trị", "sơ yếu lý lịch"],
+    "secondary": ["Kinh", "Tày", "Thái", "Mường", "Công giáo", "Phật giáo", "đảng ủy", "đoàn viên", "công đoàn", "thành phần gia đình"]
+  },
+  "false_positive_reduction": {
+    "min_context_window": 150,
+    "exclude_if_no_keywords": true
+  }
+}

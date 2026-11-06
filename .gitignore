@@ -1,0 +1,20 @@
+# Build output
+bin/
+obj/
+publish/
+# Model AI nặng (4.6GB) - không đưa lên git
+models/
+# Dữ liệu test cục bộ, có thể chứa dữ liệu nhạy cảm
+watch-folder/
+test.txt
+# Cấu hình cục bộ của Claude/IDE
+.claude/
+.vs/
+*.user
+tools/eval/size-corpus/
+tools/eval/results/
+tools/tika-bench/results/
+tools/tika-bench/corpus*/
+tools/perf/results/
+tools/tika-native/target/
+tools/tika-native/build*/

@@ -1,0 +1,20 @@
+<!-- [Thay đổi] File mới (mục 13.3 - Hiệu năng: "Đo thời gian trích, prefill, sinh... p95 độ trễ... Tỷ lệ lỗi parse
+     JSON"): benchmark LLM thật (DlpLlmHost đang chạy) trên bộ dữ liệu nhãn CÓ SẴN của dự án (D:\dlp-classifier\
+     rawdata, cùng bộ tools/eval/DlpBaseline đang dùng cho baseline regex) — đo p50/p95 độ trễ, tokens/s, RAM, tỷ lệ
+     lỗi parse, và tiện thể so khớp với nhãn thật (Public/Internal/Confidential/Restricted — CÙNG enum SensitivityLevel
+     đã dùng ở DlpService.Classification). -->
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>DlpLlmBenchmark</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\..\DlpService\DlpService.csproj" />
+  </ItemGroup>
+
+</Project>

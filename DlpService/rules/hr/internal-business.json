@@ -1,0 +1,140 @@
+{
+  "id": "hr_internal_business_001",
+  "name": "HR-030 Văn bản nghiệp vụ nhân sự nội bộ thông thường",
+  "category": "hr",
+  "level": "INTERNAL",
+  "weight": 0.75,
+  "priority": 39,
+  "tags": ["hr", "business_internal", "generic_internal"],
+  "enabled": true,
+  "notes": [
+    "HR-030 - Văn bản nghiệp vụ nhân sự nội bộ thông thường (HR-specific BUSINESS_INTERNAL, tách khỏi org/business_internal_001 vì cần KHÔNG có level_gate quá lỏng). 336/1544 (22%) file hr__internal từng bị chấm sai PUBLIC: a) 266 file không khớp rule nào (dùng từ vựng đặc thù nhân sự: thống kê nhân sự, đoàn viên công đoàn, bản mô tả công việc, bảng chấm công...); b) 63 file khớp business_internal_001 nhưng bị gate hạ về PUBLIC vì chỉ khớp 1 lần.",
+    "ĐÃ THÊM level_gate (không bỏ qua như dự tính ban đầu): từ vựng nhân sự ở đây lặp lại khá phổ biến trong văn bản CÔNG KHAI hợp pháp (báo cáo ESG/CSR công bố 'tỷ lệ nghỉ việc'/'số lượng đoàn viên công đoàn', tin tuyển dụng chia sẻ 'bản mô tả công việc mẫu', tiêu đề 'Chat nội bộ' không tự nó đảm bảo nội dung nhạy cảm) — phát hiện hồi quy 157 file PUBLIC bị đẩy sai INTERNAL nếu không gate.",
+    "ĐÃ GỘP thay vì tạo rule mới (theo yêu cầu 'nếu có thể kết hợp các rule thì không cần thêm rule'): 8 rule đề xuất (HR-030 họp/nghỉ lễ/chấm công/ngân sách tuyển dụng/thống kê nhân sự/khung lương/công đoàn/JD) phần lớn trùng lặp pattern đã có — chỉ gộp thêm tín hiệu MỚI (kênh liên lạc họp, thành phần tham dự, thông báo nghỉ lễ, ngân sách tuyển dụng cụ thể, JD gắn số HĐLĐ, ngày kết nạp đoàn viên) vào patterns k->p, dùng chung 1 level_gate đã kiểm chứng.",
+    "ĐÃ XÓA pattern gốc 'thống kê nhân sự'/'tỷ lệ nghỉ việc'/'số lượng nhân sự' (bare): kiểm chứng trên hr__public cho thấy đây là chỉ số THƯỜNG ĐƯỢC CÔNG BỐ CÔNG KHAI trong báo cáo ESG/CSR thường niên, gây 157/1600 file PUBLIC bị đẩy sai INTERNAL. Thay bằng pattern_q/r/s CHỈ khớp cấu trúc tiêu đề/khung báo cáo nội bộ định kỳ (kỳ báo cáo, đầu kỳ/cuối kỳ theo phòng ban) — khác hẳn 1 dòng KPI đơn lẻ trong báo cáo công khai.",
+    "CỐ Ý KHÔNG thêm câu tự khai 'chỉ lưu hành nội bộ, không công bố' — đã có sẵn, rộng hơn, và KHÔNG gate ở watermark.json (tag lưu hành nội bộ), thêm lại ở đây chỉ trùng lặp không cần thiết.",
+    "Ghi chú ngưỡng confidence trong tài liệu gốc (base = pattern.confidence x rule.weight so với MinConfidence=0.60 của engine Go tham khảo) KHÔNG áp dụng cho engine C# hiện tại — Confidence là field chỉ để tham khảo (chưa có logic dùng), engine khớp nhị phân. Giữ nguyên các giá trị confidence từ PDF (0.82 cho HR-030m/q/r/s...) để đúng nội dung tham chiếu, dù chưa có tác dụng thật lúc quét."
+  ],
+  "patterns": [
+    {
+      "regex": "(?i)chat\\s*nội\\s*bộ\\s*[-–—]\\s*phòng",
+      "description": "HR-030a Chat nội bộ - Phòng X",
+      "confidence": 0.70,
+      "context_required": false
+    },
+    {
+      "regex": "(?i)k[ếe]\\s*ho[ạa]ch\\s*(?:tuy[ểe]n\\s*d[ụu]ng|đ[àa]o\\s*t[ạa]o)",
+      "description": "HR-030c Kế hoạch tuyển dụng/đào tạo",
+      "confidence": 0.72,
+      "context_required": false
+    },
+    {
+      "regex": "(?i)b[ảa]n\\s*m[ôo]\\s*t[ảa]\\s*c[ôo]ng\\s*vi[ệe]c",
+      "description": "HR-030d Bản mô tả công việc",
+      "confidence": 0.78,
+      "context_required": false
+    },
+    {
+      "regex": "(?i)đo[àa]n\\s*vi[êe]n\\s*c[ôo]ng\\s*đo[àa]n|c[ôo]ng\\s*đo[àa]n\\s*c[ơo]\\s*s[ởo]",
+      "description": "HR-030e Đoàn viên công đoàn / công đoàn cơ sở",
+      "confidence": 0.75,
+      "context_required": false
+    },
+    {
+      "regex": "(?i)khung\\s*l[ươu][ơo]ng\\s*theo\\s*c[ấa]p\\s*b[ậa]c|ch[íi]nh\\s*s[áa]ch\\s*khung\\s*l[ươu][ơo]ng",
+      "description": "HR-030f Khung lương theo cấp bậc",
+      "confidence": 0.78,
+      "context_required": false
+    },
+    {
+      "regex": "(?i)quy\\s*tr[ìi]nh\\s*đ[áa]nh\\s*gi[áa]\\s*(?:hi[ệe]u\\s*su[ấa]t|n[ăa]ng\\s*l[ựu]c)",
+      "description": "HR-030g Quy trình đánh giá hiệu suất/năng lực",
+      "confidence": 0.75,
+      "context_required": false
+    },
+    {
+      "regex": "(?i)b[ảa]ng\\s*ch[ấa]m\\s*c[ôo]ng",
+      "description": "HR-030h Bảng chấm công",
+      "confidence": 0.78,
+      "context_required": false
+    },
+    {
+      "regex": "(?i)bi[êe]n\\s*b[ảa]n\\s*h[ọo]p\\s*(?:ph[òo]ng|b[ộo]\\s*ph[ậa]n)",
+      "description": "HR-030i Biên bản họp phòng/bộ phận",
+      "confidence": 0.72,
+      "context_required": false
+    },
+    {
+      "regex": "(?i)th[ôo]ng\\s*b[áa]o\\s*l[ịi]ch\\s*h[ọo]p|th[ôo]ng\\s*b[áa]o\\s*n[ộo]i\\s*b[ộo]\\s*chung",
+      "description": "HR-030j Thông báo lịch họp / thông báo nội bộ chung",
+      "confidence": 0.72,
+      "context_required": false
+    },
+    {
+      "regex": "(?i)đ[ếe]n\\s*[:=]\\s*.{0,20}(?:to[àa]n\\s*th[ểe]|to[àa]n\\s*b[ộo]|t[ậa]p\\s*th[ểe]|th[àa]nh\\s*vi[êe]n).{0,20}(?:nh[âa]n\\s*vi[êe]n|c[áa]n\\s*b[ộo]|ph[òo]ng|b[ộo]\\s*ph[ậa]n)|đ[ếe]n\\s*[:=]\\s*all\\s*staff",
+      "description": "HR-030q Memo/email gửi nội bộ (Đến: Toàn thể/Tập thể/Thành viên phòng...)",
+      "confidence": 0.82,
+      "context_required": false
+    },
+    {
+      "regex": "(?i)b[áa]o\\s*c[áa]o\\s*th[ốo]ng\\s*k[êe]\\s*nh[âa]n\\s*s[ựu]|k[ỳy]\\s*b[áa]o\\s*c[áa]o\\s*[:=]\\s*(?:qu[ýy]|th[áa]ng)",
+      "description": "HR-030r Tiêu đề báo cáo thống kê nhân sự / kỳ báo cáo nội bộ",
+      "confidence": 0.82,
+      "context_required": false
+    },
+    {
+      "regex": "(?i)s[ốo]\\s*l[ượu][ợo]ng\\s*đ[ầa]u\\s*k[ỳy]|s[ốo]\\s*l[ượu][ợo]ng\\s*cu[ốo]i\\s*k[ỳy]",
+      "description": "HR-030s Bảng biến động nhân sự đầu kỳ/cuối kỳ",
+      "confidence": 0.82,
+      "context_required": false
+    },
+    {
+      "regex": "(?i)(?:link\\s*zoom|zoom\\.us\\/j\\/|s[ốo]\\s*m[áa]y\\s*l[ẻe]|hotline\\s*n[ộo]i\\s*b[ộo]|t[ổo]ng\\s*đ[àa]i\\s*n[ộo]i\\s*b[ộo])",
+      "description": "HR-030k Kênh liên lạc nội bộ (Zoom/hotline/tổng đài)",
+      "confidence": 0.55,
+      "context_required": true
+    },
+    {
+      "regex": "(?i)th[àa]nh\\s*ph[ầa]n\\s*tham\\s*d[ựu]\\s*[:=]?\\s*[\\r\\n]?(?:.{0,30}[-–]\\s*(?:[Oo]ng|[Bb][àa])\\s+[A-ZÀ-Ỵ])",
+      "description": "HR-030l Thành phần tham dự liệt kê tên cụ thể",
+      "confidence": 0.60,
+      "context_required": false
+    },
+    {
+      "regex": "(?i)th[ôo]ng\\s*b[áa]o\\s*l[ịi]ch\\s*ngh[ỉi]\\s*l[ễe]",
+      "description": "HR-030m Thông báo lịch nghỉ lễ",
+      "confidence": 0.82,
+      "context_required": true
+    },
+    {
+      "regex": "(?i)ng[âa]n\\s*s[áa]ch\\s*(?:tuy[ểe]n\\s*d[ụu]ng|đ[àa]o\\s*t[ạa]o|nh[âa]n\\s*s[ựu])\\s*(?:d[ựu]\\s*ki[ếe]n)?\\s*[:=]?\\s*\\d{1,3}(?:[.,]\\d{3}){2,4}\\s*(?:VNĐ|đồng)",
+      "description": "HR-030n Ngân sách tuyển dụng/đào tạo cụ thể",
+      "confidence": 0.82,
+      "context_required": false
+    },
+    {
+      "regex": "(?i)(?:ph[ụu]\\s*l[ụu]c\\s*)?đ[íi]nh\\s*k[èe]m\\s*h[ợo]p\\s*đ[ồo]ng\\s*lao\\s*đ[ộo]ng\\s*s[ốo]\\s*[\\d\\/A-Zđ.]{3,20}",
+      "description": "HR-030o JD đính kèm hợp đồng lao động số cụ thể",
+      "confidence": 0.85,
+      "context_required": false
+    },
+    {
+      "regex": "(?i)ng[àa]y\\s*k[ếe]t\\s*n[ạa]p\\s*(?:đo[àa]n\\s*vi[êe]n)?|[ủu]y\\s*vi[êe]n\\s*BCH|ch[ủu]\\s*t[ịi]ch\\s*c[ôo]ng\\s*đo[àa]n",
+      "description": "HR-030p Ngày kết nạp đoàn viên / chức vụ công đoàn",
+      "confidence": 0.55,
+      "context_required": true
+    }
+  ],
+  "keywords": {
+    "primary": ["chat nội bộ - phòng", "kế hoạch tuyển dụng", "kế hoạch đào tạo", "bản mô tả công việc", "đoàn viên công đoàn", "công đoàn cơ sở", "khung lương theo cấp bậc", "quy trình đánh giá hiệu suất", "quy trình đánh giá năng lực", "bảng chấm công", "biên bản họp", "thông báo lịch họp", "thông báo nội bộ chung", "thông báo lịch nghỉ lễ", "ngân sách tuyển dụng", "ngân sách đào tạo", "đính kèm hợp đồng lao động", "thành phần tham dự", "ngày kết nạp", "toàn thể nhân viên", "all staff", "báo cáo thống kê nhân sự", "kỳ báo cáo", "số lượng đầu kỳ", "số lượng cuối kỳ"],
+    "secondary": ["phòng nhân sự", "phòng ban", "bộ phận", "nhân viên", "quản lý trực tiếp", "hội đồng đánh giá", "hotline nội bộ", "chủ tịch công đoàn"]
+  },
+  "level_gate": {
+    "require_corroboration": true,
+    "fallback_level": "PUBLIC"
+  },
+  "false_positive_reduction": {
+    "min_context_window": 100,
+    "exclude_if_no_keywords": true
+  }
+}

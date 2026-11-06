@@ -1,0 +1,66 @@
+{
+  "id": "biometric_001",
+  "name": "Dữ liệu sinh trắc học (vân tay, khuôn mặt, mống mắt)",
+  "category": "pii",
+  "level": "SECRET",
+  "weight": 0.92,
+  "priority": 83,
+  "tags": ["pii", "biometric", "fingerprint", "face_id", "sensitive_pii", "ndctn13", "pii_strong"],
+  "enabled": true,
+  "notes": [
+    "PII - Dữ liệu sinh trắc học (Biometric Data). NĐ 13/2023/NĐ-CP Điều 2 Khoản 4 và GDPR Article 9(1): sinh trắc học là dữ liệu cá nhân nhạy cảm đặc biệt. Rò rỉ KHÔNG THỂ KHẮC PHỤC — mật khẩu có thể đổi, vân tay không thể đổi.",
+    "pattern_1/3/4 CHỈ là nhắc đến CHỦ ĐỀ sinh trắc (vd PR ngân hàng 'xác thực khuôn mặt bằng công nghệ AI'), KHÔNG chứng minh có dữ liệu sinh trắc THẬT — chỉ CONFIDENTIAL (override_level), không tự động SECRET. Chỉ pattern_2 (template/embedding CÓ giá trị base64 thật) mới là bằng chứng dữ liệu sinh trắc thật, giữ SECRET.",
+    "ĐÃ THỬ required_corroboration_tags:[personal_identifier] TRƯỚC (như health_001/income_001) NHƯNG BỊ LOẠI: 53/71 file FP vẫn có personal_identifier vì chính dob_001/vn_name_001 cũng FP trên cùng văn bản PR (dob_001 khớp ngày phát hành thông cáo; vn_name_001 khớp tên lãnh đạo được trích phát biểu) — dùng làm gate sẽ không lọc được phần lớn case.",
+    "Chuyển sang negation_filter theo NGỮ VỰNG MARKETING đặc trưng (công nghệ, tính năng, trải nghiệm, ra mắt, phát biểu, lãnh đạo...): văn bản đăng ký sinh trắc THẬT dùng 'hồ sơ đăng ký', 'tỷ lệ khớp', 'loại sinh trắc học thu thập' — khác hẳn brochure PR. Xác nhận an toàn: chỉ 5/679 match thật trên finance_banking__top_secret rơi vào trigger.",
+    "override_level trên từng pattern và required_corroboration_tags CHƯA được engine C# đọc (dead field cho tới khi mở rộng RuleDefinition/PatternDefinition) — hiện toàn bộ pattern của rule dùng chung rule.level (SECRET), nên pattern_1/3/4 hiện tại vẫn góp phần đẩy SECRET thay vì chỉ CONFIDENTIAL như thiết kế PDF."
+  ],
+  "patterns": [
+    {
+      "regex": "(?i)(?:fingerprint|vân\\s*tay|dấu\\s*vân\\s*tay|face\\s*id|face\\s*recognition|nhận\\s*dạng\\s*khuôn\\s*mặt|facial\\s*recognition|sinh\\s*trắc\\s*học|biometric(?:\\s*data)?|iris\\s*scan|võng\\s*mạc|retina|voice\\s*print|nhận\\s*dạng\\s*giọng\\s*nói)",
+      "description": "Từ khóa sinh trắc học trực tiếp (chỉ nhắc chủ đề)",
+      "confidence": 0.88,
+      "context_required": false,
+      "override_level": "CONFIDENTIAL"
+    },
+    {
+      "regex": "(?i)(?:fingerprint|biometric|face)\\s*(?:template|data|hash|embedding|vector|feature)\\s*[:=]\\s*[A-Za-z0-9+/=]{20,}",
+      "description": "Template / embedding dữ liệu sinh trắc học",
+      "confidence": 0.95,
+      "context_required": false,
+      "override_level": "SECRET"
+    },
+    {
+      "regex": "(?i)(?:dữ\\s*liệu\\s*chip|chip\\s*data|contactless\\s*chip|NFC\\s*data|thẻ\\s*chip|ePassport\\s*data|eMRTD)",
+      "description": "Dữ liệu chip CCCD / hộ chiếu điện tử (chứa sinh trắc)",
+      "confidence": 0.85,
+      "context_required": false,
+      "override_level": "CONFIDENTIAL"
+    },
+    {
+      "regex": "(?i)(?:touchid|touch\\s*id|faceid|face\\s*id|windows\\s*hello|liveness\\s*detection|anti-spoofing|nhận\\s*dạng\\s*sinh\\s*trắc)",
+      "description": "Xác thực sinh trắc kỹ thuật số (TouchID, FaceID, Windows Hello)",
+      "confidence": 0.82,
+      "context_required": true,
+      "override_level": "CONFIDENTIAL"
+    }
+  ],
+  "keywords": {
+    "primary": ["sinh trắc học", "biometric", "vân tay", "fingerprint", "khuôn mặt", "face recognition", "nhận dạng khuôn mặt", "mống mắt", "iris", "giọng nói", "voice recognition", "FaceID", "TouchID", "nhận dạng sinh trắc"],
+    "secondary": ["xác thực", "authentication", "template", "embedding", "chip CCCD", "ePassport", "liveness", "chống giả mạo", "anti-spoofing", "định danh sinh trắc"]
+  },
+  "false_positive_reduction": {
+    "min_context_window": 150,
+    "exclude_if_no_keywords": false
+  },
+  "level_gate": {
+    "require_corroboration": true,
+    "fallback_level": "PUBLIC",
+    "applies_to_patterns": ["pattern_1", "pattern_3", "pattern_4"]
+  },
+  "negation_filter": {
+    "window_chars": 60,
+    "trigger_words": ["công nghệ", "tính năng", "trải nghiệm người dùng", "ra mắt", "ký kết hợp tác", "sản phẩm mới", "ứng dụng ngân hàng", "phát biểu", "chia sẻ", "lãnh đạo"],
+    "action": "downgrade_to_gate",
+    "applies_to_patterns": ["pattern_1", "pattern_3", "pattern_4"]
+  }
+}

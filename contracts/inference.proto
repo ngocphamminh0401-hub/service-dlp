@@ -1,0 +1,190 @@
+// [Thay đổi] File mới: hợp đồng gRPC CHỐT CHÍNH THỨC giữa Regex service và LLM process (docs/kien-truc-trien-khai.md
+// mục 5.2). contract_ver = 1 khoá cứng — chỉ tăng khi thay đổi PHÁ VỠ tương thích (mục 5.3); thêm field tuỳ chọn
+// (optional, số thứ tự mới) thì không cần tăng. labels/evidence dùng enum (không phải string) để "tập đóng" được ép
+// buộc ở tầng schema: LLM không thể trả về giá trị lạ mà hệ thống lỡ chấp nhận.
+//
+// Đây là bản CHỐT SCHEMA — chưa có server/client gRPC thật (Worker LLM, mục 4.12, chưa triển khai). File .proto này
+// làm nền để sinh code sau này (protoc/Grpc.Tools); enum tương ứng phía C# nằm ở DlpService/Llm/Label.cs và
+// EvidenceCode.cs, dùng được ngay cả trước khi có codegen thật.
+syntax = "proto3";
+
+package dlp.inference;
+option csharp_namespace = "Dlp.Inference";
+
+// contract_ver hiện tại = 1 (xem ContractVersion.cs phía C#)
+
+service Inference {
+  rpc GetInfo (Empty)        returns (Info);
+  rpc Classify (ClassifyReq) returns (ClassifyRes);
+  rpc Cancel  (CancelReq)    returns (Empty);
+}
+
+message Empty {}
+
+message Info {
+  bool   ready = 1;
+  uint32 contract_ver = 2;
+  string model_ver = 3;
+  string prompt_ver = 4;
+  uint32 max_chunks = 5;
+  uint32 max_input_tokens = 6;
+  uint32 queue_depth = 7;
+  uint64 rss_bytes = 8;
+}
+
+message Meta {
+  string file_type = 1;
+  string file_name = 2;
+  string parent_dir = 3;
+  string title = 4;
+  repeated string columns = 5;
+  string size_bucket = 6;
+}
+
+// Kind: "full" | "metadata" | "context" | "sample" | "stats" (xem DlpService/Llm/ChunkSelector.cs — ChunkResult.Kind)
+message Chunk {
+  string kind = 1;
+  string rule = 2;
+  string text = 3; // ĐÃ MASK (DlpService/Llm/Masker.cs) — không được chứa giá trị thật
+}
+
+message Finding {
+  string rule_id = 1;
+  string category = 2;
+  float  score = 3;
+  bool   validator_passed = 4;
+  uint32 count = 5;
+  string location = 6;
+  bool   hard_rule = 7;
+}
+
+message ClassifyReq {
+  string job_id = 1;
+  uint32 contract_ver = 2;
+  Meta   meta = 3;
+  repeated Chunk chunks = 4;
+  repeated Finding findings = 5;
+  uint32 deadline_ms = 6;
+}
+
+message Verdict {
+  string rule_id = 1;       // rỗng nếu LLM tự phát hiện thêm (không gắn với rule đã có)
+  bool   true_positive = 2;
+  float  confidence = 3;
+}
+
+message ClassifyRes {
+  string job_id = 1;
+  string model_ver = 2;
+  string prompt_ver = 3;
+  repeated Label labels = 4;          // tập đóng — xem enum Label
+  float  confidence = 5;
+  repeated Verdict verdicts = 6;
+  repeated EvidenceCode evidence = 7; // tập đóng — xem enum EvidenceCode
+  uint32 latency_ms = 8;
+  Status status = 9;
+
+  // [Thay đổi] Phân loại 4 mức nhạy cảm cho CẢ gói (song song với labels/verdicts theo rule_id ở trên, KHÔNG thay
+  // thế) — field tuỳ chọn mới, không cần tăng contract_ver (mục 5.3). Rỗng/mặc định nếu LLM chưa hỗ trợ việc này.
+  SensitivityLevel sensitivity_level = 10;
+  MatchedRule matched_rule = 11;
+  bool need_review = 12;
+  string reason = 13;
+
+  // [Thay đổi] mục 13.3 "Hiệu năng: đo tokens/s" — tổng số token THẬT đã sinh (cộng dồn qua các batch nếu request
+  // bị chia nhỏ, mục 6.4), để benchmark tính tokens/s = generated_tokens / (latency_ms/1000). Field tuỳ chọn mới,
+  // không cần tăng contract_ver.
+  uint32 generated_tokens = 14;
+}
+
+message CancelReq {
+  string job_id = 1;
+}
+
+enum Status {
+  OK = 0;
+  TIMEOUT = 1;
+  BUSY = 2;
+  BAD_CONTRACT = 3;
+  MODEL_ERROR = 4;
+  NOT_READY = 5;
+  // [Thay đổi] Đầu ra của model bị cắt do chạm trần token mà JSON vẫn chưa hợp lệ. Vì sinh tham lam (do_sample=false),
+  // gửi lại CÙNG đầu vào sẽ ra CÙNG kết quả -> đây là lỗi VĨNH VIỄN của file đó (khác MODEL_ERROR/TIMEOUT là lỗi tạm):
+  // DlpService không thử lại job và không tính vào circuit breaker. Thêm giá trị enum mới, KHÔNG cần tăng contract_ver
+  // (bản DlpService cũ gặp giá trị lạ vẫn coi là "chưa làm được" và thử lại như trước).
+  OUTPUT_TOO_LONG = 6;
+}
+
+// [Thay đổi] Chốt tập đóng nhãn (mục 6.5 + phụ lục 17.1 — trước đây doc tham chiếu tới nhưng chưa viết). Gộp 56 rule
+// đang có trong rules/ thành các nhóm đủ rộng cho LLM gán nhãn; rule_id cụ thể vẫn đi qua Verdict/Finding, KHÔNG cần
+// lặp lại ở đây. Thêm nhãn mới: được (không phá vỡ tương thích, contract_ver giữ nguyên). Đổi/xoá nhãn cũ: PHẢI tăng
+// contract_ver vì client cũ có thể đang so khớp đúng số thứ tự này.
+enum Label {
+  NONE = 0; // không có gì nhạy cảm
+
+  PII_NATIONAL_ID = 1;         // vn_id, passport
+  PII_PHONE = 2;                // phone
+  PII_EMAIL = 3;                // email, vnpt_email
+  PII_FULL_NAME = 4;            // vn_name
+  PII_DATE_OF_BIRTH = 5;        // dob
+  PII_BIOMETRIC = 6;            // biometric
+  PII_SENSITIVE_ATTRIBUTE = 7;  // ethnicity_religion_political
+  PII_SOCIAL_INSURANCE = 8;     // social_insurance
+  PII_LOCATION_TRACKING = 9;    // location_tracking
+
+  FINANCE_BANK_ACCOUNT = 10;    // bank_account, iban, swift_bic
+  FINANCE_CREDIT_CARD = 11;     // credit_card, cvv
+  FINANCE_TAX_CODE = 12;        // tax_code_business, tax_code_personal
+  FINANCE_SALARY = 13;          // income
+  FINANCE_FRAUD_CASE = 14;      // fraud_investigation, fraud_transaction_flag
+  FINANCE_INTERNAL_REPORT = 15; // fin_* (9 rule), insurance_context
+
+  SECRET_CREDENTIAL = 16;       // credentials, otp_auth, otp_table_header
+  SECRET_INTERNAL_CODE = 17;    // internal_code, internal_ip
+
+  LEGAL_CONTRACT = 18;             // contract
+  LEGAL_CLASSIFIED_DOCUMENT = 19;  // classified_doc
+  LEGAL_WATERMARK = 20;            // watermark
+
+  HR_HEALTH = 21;                // health, healthcare_internal_business
+  HR_PERSONNEL_RECORD = 22;      // hr_offer_letter, hr_party_membership_dossier, hr_internal_business, hr_internal_chat_protected_attributes
+  HR_DISCIPLINARY_CASE = 23;     // hr_disciplinary_health_investigation, hr_sexual_harassment_complaint, hr_workplace_accident_investigation
+
+  ORG_INTERNAL_BUSINESS = 24;   // business_internal, business_internal_specific
+  ORG_VIP_CUSTOMER = 25;        // vip_customer
+}
+
+// [Thay đổi] Chốt tập đóng evidence/reason_code (mục 6.5 + phụ lục 17.2). Chỉ dùng khi LLM PHÁT HIỆN THÊM (không có
+// rule_id backing) và cần giải thích "vì sao nghĩ đây là nhạy cảm" bằng tín hiệu ngữ cảnh — khớp đúng 5 loại chunk mà
+// ChunkSelector (mục 4.10) đã tạo sẵn: metadata (cột/tiêu đề/tên file), context (từ khoá quanh match), sample (hình
+// dạng giá trị).
+enum EvidenceCode {
+  UNKNOWN_EVIDENCE = 0; // proto3 bắt buộc giá trị 0; KHÔNG dùng làm evidence thật, chỉ là giá trị mặc định/lỗi
+  COLUMN_NAME = 1;      // tên cột gợi ý (ChunkSelector: chunk "metadata", TableHeader)
+  KEYWORD_CONTEXT = 2;  // từ khoá xung quanh (chunk "context")
+  FORMAT_SHAPE = 3;     // hình dạng giá trị giống PII (VD dãy số giống CCCD) dù rule chính không khớp
+  DOCUMENT_TITLE = 4;   // tiêu đề tài liệu (chunk "metadata", Heading/SectionMarker)
+  FILE_PATH = 5;        // tên file/đường dẫn đáng nghi (chunk "metadata")
+}
+
+// [Thay đổi] Phân loại 4 mức nhạy cảm CHO CẢ GÓI (khác hẳn enum Label ở trên — Label gắn với TỪNG rule_id, còn
+// SensitivityLevel là 1 kết luận duy nhất cho toàn bộ nội dung gửi LLM). Thêm mới, dùng song song, không thay thế.
+enum SensitivityLevel {
+  PUBLIC = 0;
+  INTERNAL = 1;
+  CONFIDENTIAL = 2;
+  RESTRICTED = 3;
+}
+
+// Lý do khớp bước nào trong quy trình quyết định 4 mức (đi kèm SensitivityLevel, không liên quan enum Label).
+enum MatchedRule {
+  UNKNOWN_MATCHED_RULE = 0; // proto3 bắt buộc giá trị 0; KHÔNG dùng làm giá trị thật
+  PUBLIC_PUBLISHED = 1;
+  INTERNAL_OPS = 2;
+  PII_BASIC = 3;
+  FINANCIAL_CONFIDENTIAL = 4;
+  AUTH_SECRET = 5;
+  SPECIAL_CATEGORY = 6;
+  LEGAL_INVESTIGATION = 7;
+  MA_STRATEGY = 8;
+}

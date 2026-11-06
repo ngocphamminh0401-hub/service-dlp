@@ -1,0 +1,48 @@
+{
+  "id": "cvv_001",
+  "name": "Cvv",
+  "category": "financial",
+  "level": "SECRET",
+  "weight": 0.95,
+  "priority": 98,
+  "tags": ["financial", "cvv", "cvc", "csc", "pci_dss", "card_data"],
+  "enabled": true,
+  "notes": [
+    "FIN-004 - CVV/CVC/CSC (Card Verification Value). PCI-DSS v4.0 Req. 3.3.1: CVV/CVC/CID KHÔNG được lưu trữ sau authorization. Sự có mặt của CVV trong file là vi phạm PCI-DSS nghiêm trọng.",
+    "CVV là 3 chữ số (Visa/Mastercard/Discover/Napas); CID là 4 chữ số (Amex). CVV 3-4 số đơn lẻ có quá nhiều FP nên PHẢI có label 'CVV:'/'CVC:'... ngay trước — pattern nhúng label vào regex.",
+    "KHÔNG đưa vào rule pattern thứ 3 của PDF (\\\\d{3,4} đứng một mình, confidence=0.30, chỉ để hỗ trợ cvv_expiry_boost bên credit_card_001): engine hiện tại khớp nhị phân (không tính điểm tin cậy nên không tự loại được match confidence thấp) — nếu thêm vào sẽ khớp NHẦM mọi dãy 3-4 số trong file thành CVV. Giữ nguyên chỉ 2 pattern có label.",
+    "CVV không có validator thuật toán (không như số thẻ có Luhn) — cần >=2 lần xuất hiện hoặc rule khác (credit_card_001) cùng ở mức CONFIDENTIAL+ mới giữ SECRET, ngược lại hạ về CONFIDENTIAL.",
+    "Hệ số discount thấp hơn credentials (0.4 vs 0.5): CVV thật ngẫu nhiên hiếm khi trùng dãy lặp/tuần tự nên giá trị blocklist gần như chắc chắn là ví dụ minh họa."
+  ],
+  "patterns": [
+    {
+      "regex": "(?i)(?:CVV2?|CVC2?|CSC|card\\s*security\\s*code|card\\s*verification)\\s*[:=\\-]?\\s*\\d{3,4}\\b",
+      "description": "CVV/CVC/CSC label + 3-4 chữ số (PCI-DSS sensitive)",
+      "confidence": 0.97,
+      "context_required": false
+    },
+    {
+      "regex": "(?i)(?:icvv|dynamic\\s*cvv|dCVV)\\s*[:=\\-]?\\s*\\d{3,4}\\b",
+      "description": "iCVV / Dynamic CVV (thẻ chip)",
+      "confidence": 0.95,
+      "context_required": false
+    }
+  ],
+  "keywords": {
+    "primary": ["CVV", "CVC", "CVV2", "CVC2", "CSC", "card security code", "mã bảo mật", "security code"],
+    "secondary": ["thẻ tín dụng", "credit card", "debit card", "thẻ ghi nợ", "CID", "card verification", "3-digit", "4-digit"]
+  },
+  "level_gate": {
+    "require_corroboration": true,
+    "fallback_level": "CONFIDENTIAL"
+  },
+  "false_positive_reduction": {
+    "min_context_window": 100,
+    "exclude_if_no_keywords": false
+  },
+  "placeholder_exclusion": {
+    "value_blocklist_patterns": ["^(000|123|111|999|0000|1234|9999)$"],
+    "doc_context_discount_keywords": ["hướng dẫn", "ví dụ", "là gì", "khái niệm", "training", "tutorial"],
+    "doc_context_discount_factor": 0.4
+  }
+}

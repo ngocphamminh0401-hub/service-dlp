@@ -1,0 +1,54 @@
+{
+  "id": "vn_name_001",
+  "name": "Họ tên người Việt Nam",
+  "category": "pii",
+  "level": "INTERNAL",
+  "weight": 0.70,
+  "priority": 30,
+  "tags": ["pii", "personal_name", "pii_name", "vn_specific", "personal_identifier"],
+  "enabled": true,
+  "notes": [
+    "PII-005 - Họ tên người Việt Nam. Phát hiện dựa trên top 35 họ VN phổ biến nhất (~98% dân số, Tổng điều tra dân số 2019). Yêu cầu đúng cấu trúc [Họ] [Tên đệm]* [Tên] (2-4 từ). Dùng \\p{Lu}\\p{L}+ cho Unicode Vietnamese (RE2/Go và .NET regex đều hỗ trợ \\p{Lu}/\\p{L}).",
+    "\\p{L}* (không phải \\p{L}+) cho token cuối: cho phép token 1 ký tự để capture ĐẦY ĐỦ tên placeholder kiểu 'Nguyễn Văn A' — nếu dùng \\p{L}+ chữ 'A' đơn lẻ bị bỏ ngoài match, khiến placeholder_exclusion phía dưới không bao giờ khớp được.",
+    "pattern_3 (họ tên ở dòng riêng ngay sau số thứ tự — hàng dữ liệu dạng bảng docx/pdf): tên bệnh nhân/khách hàng trong bảng xuất hiện dạng '1\\nPhạm Đình Khánh\\n...' — pattern_1 vẫn khớp ĐÚNG REGEX nhưng bị loại ở ngưỡng confidence cuối cùng vì distanceWeightedBoost tới keyword 'họ và tên' ở xa (header bảng cách xa hàng dữ liệu). Giải pháp: coi 'số thứ tự đứng riêng 1 dòng + họ tên đứng riêng dòng kế tiếp' là TÍN HIỆU CẤU TRÚC đủ mạnh để tự đứng, confidence đủ cao (0.90) để không phụ thuộc keyword ở xa. [^\\S\\n]+ (không phải \\s+) giữa các từ trong tên: chỉ chấp nhận space/tab CÙNG DÒNG, tránh tên vắt sang dòng/ô kế tiếp.",
+    "Danh sách tên dùng chức danh thay 'họ tên' (lịch trực khoa/gác: 'Bác sĩ trực'/'Điều dưỡng trực') được thêm vào keywords.primary — cùng loại dữ liệu (tên thật, không ẩn danh) nhưng thiếu keyword 'họ tên' khiến context_required không thỏa dù danh sách tên vẫn hiện diện đầy đủ trong bảng.",
+    "level_gate: rule chưa từng có gate trước đây — 1 tên người đứng lẻ trong tin tức/thông cáo báo chí PUBLIC ('Giám đốc Nguyễn Văn A phát biểu...') vẫn tự động INTERNAL — nguồn over-classify PUBLIC lớn nhất ruleset (~1670 lần là 'thủ phạm'). Cần lặp lại (danh sách nhiều tên) hoặc rule PII khác corroborate mới giữ INTERNAL.",
+    "placeholder_exclusion: tên minh họa trong văn bản mẫu VN theo quy ước '[Họ] [Chữ đệm] + 1 CHỮ CÁI ĐƠN viết hoa' (VD 'Nguyễn Văn A') — tên người Việt thật KHÔNG BAO GIỜ chỉ có 1 ký tự, nên đây là tín hiệu placeholder đáng tin cậy. value_blocklist_full_match=true vì match là CẢ CỤM họ tên nhiều từ, không có label/delimiter rõ ràng ở pattern_1 — cần kiểm tra trên toàn bộ match, không chỉ token cuối."
+  ],
+  "patterns": [
+    {
+      "regex": "(?:Nguyễn|Trần|Lê|Phạm|Hoàng|Huỳnh|Phan|Vũ|Võ|Đặng|Bùi|Đỗ|Hồ|Ngô|Dương|Lý|Đinh|Trịnh|Đoàn|Lưu|Vương|Cao|Mai|Tô|Châu|Hà|Tăng|Thái|Lâm|Đào|Quách|La|Kiều|Trương|Tiền|Linh|Văn|Thị|Ngọc|Tống|Lương|Mạc|Nghiêm|Thiều)\\s+\\p{Lu}\\p{L}*(?:\\s+\\p{Lu}\\p{L}*){1,3}",
+      "description": "Họ tên người Việt (họ phổ biến + tên đệm + tên)",
+      "confidence": 0.75,
+      "context_required": true
+    },
+    {
+      "regex": "(?i)(?:họ\\s*(?:và\\s*)?tên|tên\\s*khách\\s*hàng|full\\s*name|tên\\s*người\\s*dùng|chủ\\s*tài\\s*khoản)\\s*[:]\\s*(?:Nguyễn|Trần|Lê|Phạm|Hoàng|Huỳnh|Phan|Vũ|Võ|Đặng|Bùi|Đỗ|Hồ|Ngô|Dương|Lý|Đinh|Trịnh|Đoàn)\\s+\\p{Lu}\\p{L}*(?:\\s+\\p{Lu}\\p{L}*)*",
+      "description": "Họ tên sau label rõ ràng (họ và tên:, tên KH:, ...)",
+      "confidence": 0.90,
+      "context_required": false
+    },
+    {
+      "regex": "(?m)^[ \\t]*\\d{1,3}[ \\t]*\\r?\\n[ \\t]*(?:Nguyễn|Trần|Lê|Phạm|Hoàng|Huỳnh|Phan|Vũ|Võ|Đặng|Bùi|Đỗ|Hồ|Ngô|Dương|Lý|Đinh|Trịnh|Đoàn|Lưu|Vương|Cao|Mai|Tô|Châu|Hà|Tăng|Thái|Lâm|Đào|Quách|La|Kiều|Trương|Tiền|Linh|Văn|Thị|Ngọc|Tống|Lương|Mạc|Nghiêm|Thiều)(?:[ \\t]+\\p{Lu}\\p{L}*){1,4}[ \\t]*\\r?$",
+      "description": "Họ tên ở dòng riêng ngay sau số thứ tự (STT) — hàng dữ liệu dạng bảng (docx/pdf)",
+      "confidence": 0.90,
+      "context_required": true
+    }
+  ],
+  "keywords": {
+    "primary": ["họ tên", "họ và tên", "tên khách hàng", "full name", "tên người dùng", "tên nhân viên", "chủ tài khoản", "người đại diện", "tên chủ thẻ", "đại diện pháp luật", "người ký", "chủ sở hữu", "last name", "first name", "tên đầy đủ", "họ tên đầy đủ", "bác sĩ trực", "điều dưỡng trực"],
+    "secondary": ["khách hàng", "người dùng", "nhân viên", "hành khách", "bệnh nhân", "học sinh", "sinh viên", "ký tên", "chữ ký", "người lập", "người phê duyệt", "bên ký", "giám đốc", "trưởng phòng"]
+  },
+  "false_positive_reduction": {
+    "exclude_if_no_keywords": true,
+    "min_context_window": 100
+  },
+  "level_gate": {
+    "require_corroboration": true,
+    "fallback_level": "PUBLIC"
+  },
+  "placeholder_exclusion": {
+    "value_blocklist_patterns": ["^.+\\s\\p{Lu}$"],
+    "value_blocklist_full_match": true
+  }
+}

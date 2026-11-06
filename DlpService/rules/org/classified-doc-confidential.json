@@ -1,0 +1,47 @@
+{
+  "id": "classified_doc_002",
+  "name": "ORG-001b Tài liệu BÍ MẬT / CONFIDENTIAL",
+  "category": "org",
+  "level": "CONFIDENTIAL",
+  "weight": 0.92,
+  "priority": 94,
+  "tags": ["org", "classified_doc", "confidential"],
+  "enabled": true,
+  "notes": [
+    "ORG-001b - Nhãn CONFIDENTIAL / BÍ MẬT. Rule bổ sung tách từ classified_doc_001. Phát hiện nhãn cấp CONFIDENTIAL (L3) — không nâng lên SECRET. Lý do tồn tại: classified_doc_001 trước đây dùng override_level=SECRET cho cả 'CONFIDENTIAL' -> file L3 bị phân loại nhầm thành RESTRICTED.",
+    "pattern_1 (BÍ MẬT viết hoa) ĐÃ BỎ (?i): bản (?i) khớp cả 'giữ bí mật thông tin liên quan đến khách hàng' — điều khoản BẢO MẬT THÔNG THƯỜNG (cam kết giữ bí mật), không phải NHÃN PHÂN LOẠI văn bản. Nhãn phân loại thật luôn viết HOA TOÀN BỘ theo quy ước văn bản hành chính VN.",
+    "Mỗi pattern có override_level=CONFIDENTIAL: field này CHƯA được engine C# hiện tại đọc (RuleDefinition/PatternDefinition không có field override_level) — mức nhạy cảm thực tế vẫn lấy từ rule.level (CONFIDENTIAL) áp dụng chung cho mọi pattern của rule, không phân biệt theo từng pattern như PDF mô tả cho tới khi engine được mở rộng.",
+    "Rule này TRƯỚC ĐÂY không có level_gate nào — pattern_1 khớp nhầm TIÊU ĐỀ CHƯƠNG trong nội quy lao động liệt kê các loại tài sản cần bảo vệ ('CHƯƠNG VI. BẢO VỆ TÀI SẢN, BÍ MẬT KINH DOANH...') — điều khoản chính sách liệt kê khái niệm, không phải nhãn phân loại tài liệu thật. Xác nhận an toàn: cụm 'bí mật kinh doanh' chỉ xuất hiện 2/12743 file hr__confidential+top_secret thật, level đúng của chúng đến từ tín hiệu PII/kỷ luật khác, không phụ thuộc match này."
+  ],
+  "patterns": [
+    {
+      "regex": "\\bBÍ\\s*MẬT\\b",
+      "description": "ORG-001b nhãn bí mật (VN, viết hoa)",
+      "confidence": 0.95,
+      "context_required": false,
+      "override_level": "CONFIDENTIAL"
+    },
+    {
+      "regex": "(?i)(?:phân\\s*loại|classification|security\\s*label|label)\\s*[:=—\\-]\\s*CONFIDENTIAL\\b",
+      "description": "ORG-001b CONFIDENTIAL sau nhãn phân loại",
+      "confidence": 0.96,
+      "context_required": false,
+      "override_level": "CONFIDENTIAL"
+    },
+    {
+      "regex": "(?i)\\bCONFIDENTIAL\\b",
+      "description": "ORG-001b CONFIDENTIAL độc lập",
+      "confidence": 0.78,
+      "context_required": true,
+      "override_level": "CONFIDENTIAL"
+    }
+  ],
+  "keywords": {
+    "primary": ["BÍ MẬT", "CONFIDENTIAL", "bí mật thương mại", "thông tin mật", "company confidential", "private and confidential", "proprietary", "thông tin độc quyền", "nội dung bảo mật"],
+    "secondary": ["không được sao chép", "lưu hành hạn chế", "security classification", "phân loại tài liệu", "NDA", "hợp đồng bảo mật", "cam kết bảo mật", "thỏa thuận bảo mật", "non-disclosure", "classification level"]
+  },
+  "level_gate": {
+    "require_corroboration": true,
+    "fallback_level": "INTERNAL"
+  }
+}

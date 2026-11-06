@@ -1,0 +1,48 @@
+{
+  "id": "classified_doc_001",
+  "name": "ORG-001 Tài liệu TỐI MẬT / MẬT / RESTRICTED",
+  "category": "org",
+  "level": "SECRET",
+  "weight": 0.95,
+  "priority": 95,
+  "tags": ["org", "classified_doc", "restricted"],
+  "enabled": true,
+  "notes": [
+    "ORG-001 - Nhãn phân loại bảo mật tài liệu (Document Classification Labels), theo Luật Bảo vệ Bí mật Nhà nước 2018 và Nghị định 26/2020/NĐ-CP. Tách thành 2 rule để map đúng level: classified_doc_001 (SECRET: TỐI MẬT/MẬT/RESTRICTED/TOP SECRET), classified_doc_002 (CONFIDENTIAL: CONFIDENTIAL/BÍ MẬT) — rule cũ dùng override_level=SECRET cho tất cả nhãn kể cả 'CONFIDENTIAL' khiến toàn bộ file L3 bị nâng nhầm lên RESTRICTED.",
+    "ĐÃ GỠ HẲN (không chỉ gate/suppress) pattern 'RESTRICTED standalone' và không match 'MẬT' độc lập: dễ khớp nhầm 'restricted diet'/'restricted area' (biển báo an toàn lao động) hoặc quá phổ biến trong 'bảo mật'/'mật khẩu'/'bí mật'. 3 pattern còn lại đều yêu cầu cấu trúc nhãn rõ ràng (viết hoa toàn bộ cố định hoặc đi kèm marker 'Phân loại:'/'Classification:').",
+    "ĐÃ GỠ pattern 'bảo mật tuyệt đối': đây là câu marketing rất phổ biến trong PR ngân hàng ('...an toàn và bảo mật tuyệt đối'), không phải nhãn phân loại tài liệu — giữ lại trong keywords để boost confidence khi ĐÃ có match khác, không tự tạo match SECRET.",
+    "override_level trên mỗi pattern CHƯA được engine C# đọc (dead field cho tới khi mở rộng RuleDefinition/PatternDefinition) — mức thực tế lấy từ rule.level (SECRET).",
+    "Không có validator nào xác nhận 'TỐI MẬT' là nhãn thật (chỉ là regex keyword). 1 lần nhắc đến cụm này (vd tài liệu chính sách GIẢI THÍCH các cấp phân loại) không nên đủ để kết luận cả file SECRET — cần thêm bằng chứng (>=2 lần xuất hiện, hoặc rule khác ở mức CONFIDENTIAL+), nếu không hạ về CONFIDENTIAL."
+  ],
+  "patterns": [
+    {
+      "regex": "(?i)\\b(?:TỐI\\s*MẬT|TOP\\s*SECRET|CỰC\\s*KỲ\\s*BÍ\\s*MẬT)\\b",
+      "description": "ORG-001a nhãn tối mật / top secret",
+      "confidence": 0.97,
+      "context_required": false,
+      "override_level": "SECRET"
+    },
+    {
+      "regex": "(?i)(?:phân\\s*loại|classification|security\\s*label|label)\\s*[:=—\\-]\\s*(?:RESTRICTED|MẬT)\\b",
+      "description": "ORG-001b RESTRICTED/MẬT sau nhãn phân loại",
+      "confidence": 0.96,
+      "context_required": false,
+      "override_level": "SECRET"
+    },
+    {
+      "regex": "(?i)tuyệt\\s*mật",
+      "description": "ORG-001e tuyệt mật",
+      "confidence": 0.90,
+      "context_required": false,
+      "override_level": "SECRET"
+    }
+  ],
+  "keywords": {
+    "primary": ["TỐI MẬT", "MẬT", "TOP SECRET", "RESTRICTED", "tài liệu mật", "bí mật nhà nước", "tuyệt mật", "cực mật", "đóng dấu mật", "strictly confidential", "eyes only", "need to know", "highly sensitive", "bảo mật tuyệt đối"],
+    "secondary": ["không được sao chép", "lưu hành hạn chế", "security classification", "phân loại tài liệu", "nhạy cảm cao", "hạn chế tối đa", "kiểm soát đặc biệt", "classification level", "access control"]
+  },
+  "level_gate": {
+    "require_corroboration": true,
+    "fallback_level": "CONFIDENTIAL"
+  }
+}

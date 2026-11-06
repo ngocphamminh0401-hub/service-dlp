@@ -1,0 +1,50 @@
+{
+  "id": "hr_disciplinary_health_investigation_001",
+  "name": "HR-002 Biên bản xác minh kỷ luật liên quan sức khỏe cá nhân",
+  "category": "hr",
+  "level": "RESTRICTED",
+  "weight": 0.85,
+  "priority": 85,
+  "tags": ["hr", "disciplinary", "health_data", "pii"],
+  "enabled": true,
+  "notes": [
+    "HR-002 - Biên bản xác minh vi phạm/kỷ luật lao động liên quan đến sức khỏe cá nhân. Biên bản có mã số nhân viên/họ tên đích danh, nội dung xác minh gắn trực tiếp với LÝ DO SỨC KHỎE (giấy nghỉ ốm, chứng từ y tế, tình trạng bệnh) làm căn cứ xử lý kỷ luật/đánh giá hiệu suất. Hồ sơ kỷ luật cá nhân + dữ liệu sức khỏe kết hợp -> RESTRICTED.",
+    "ĐÃ XÓA pattern gốc 'Mã NV:'/'Mã nhân viên:' + mã NVxxxxx và keyword 'mã nhân viên': mở rộng regex khớp cả dạng đầy đủ 'Mã nhân viên:' gây HỒI QUY NẶNG trên dataset thật (912/1600 file CONFIDENTIAL bị đẩy sai lên RESTRICTED, 88.5%->39.9% accuracy) vì nhãn này PHỔ BIẾN trong mọi văn bản nhân sự, không đặc trưng cho rule này; còn vô hiệu hóa luôn exclude_if_no_keywords cho 3 pattern còn lại. Định danh cá nhân đã có sẵn qua vn_id_001/vn_name_001/dob_001 (rule khác).",
+    "Pattern 'nghỉ ốm...bất thường/nhiều lần' bắt buộc phải xuất hiện GẦN (trong 100 ký tự, 2 chiều vì RE2 không có lookaround) một từ khóa kỷ luật/xác minh/vi phạm mới coi là 'dùng làm căn cứ xử lý kỷ luật' đúng nghĩa — tránh khớp nhầm đánh giá hiệu suất/KPI thường kỳ (gây 38/1600 file bị đẩy sai RESTRICTED).",
+    "required_corroboration_tags=[personal_identifier] + strict_tags_only=true: mặc định 'hasOtherStrongRule/counts>=2' quá lỏng — 'hội đồng kỷ luật' (pattern_2, bare) khớp nhầm điều khoản chính sách chung (không gắn 1 cá nhân cụ thể), gây 8 file PUBLIC bị đẩy sai RESTRICTED. Xác nhận an toàn: 0/5 file FP PUBLIC có personal_identifier đi kèm; 114/118 file RESTRICTED thật có (4 file không có vẫn chấp nhận được, đổi lấy 8 file PUBLIC)."
+  ],
+  "patterns": [
+    {
+      "regex": "(?i)bi[êe]n\\s*b[ảa]n\\s*x[áa]c\\s*minh\\s*.{0,40}(?:vi\\s*ph[ạa]m|k[ỷy]\\s*lu[ậa]t)",
+      "description": "HR-002a Tiêu đề biên bản xác minh vi phạm/kỷ luật",
+      "confidence": 0.85,
+      "context_required": false
+    },
+    {
+      "regex": "(?i)(?:x[áa]c\\s*minh|k[ỷy]\\s*lu[ậa]t|vi\\s*ph[ạa]m)[\\s\\S]{0,100}?ngh[ỉi]\\s*[ốo]m\\s*.{0,30}(?:b[ấa]t\\s*th[ưu][ờo]ng|nhi[ềe]u\\s*l[ầa]n)|ngh[ỉi]\\s*[ốo]m\\s*.{0,30}(?:b[ấa]t\\s*th[ưu][ờo]ng|nhi[ềe]u\\s*l[ầa]n)[\\s\\S]{0,100}?(?:x[áa]c\\s*minh|k[ỷy]\\s*lu[ậa]t|vi\\s*ph[ạa]m)|gi[ấa]y\\s*x[áa]c\\s*nh[ậa]n\\s*ngh[ỉi]\\s*[ốo]m",
+      "description": "HR-002c Nghỉ ốm bất thường/nhiều lần gần ngữ cảnh xác minh/kỷ luật, hoặc giấy xác nhận nghỉ ốm",
+      "confidence": 0.72,
+      "context_required": true
+    },
+    {
+      "regex": "(?i)h[ộo]i\\s*đ[ồo]ng\\s*k[ỷy]\\s*lu[ậa]t",
+      "description": "HR-002d Hội đồng kỷ luật",
+      "confidence": 0.65,
+      "context_required": true
+    }
+  ],
+  "keywords": {
+    "primary": ["biên bản xác minh", "vi phạm quy chế", "hội đồng kỷ luật", "giấy xác nhận nghỉ ốm", "chứng từ nghỉ chế độ"],
+    "secondary": ["chấm công", "hiệu suất công việc", "kpi", "phòng pháp chế", "giải trình lý do"]
+  },
+  "level_gate": {
+    "require_corroboration": true,
+    "fallback_level": "CONFIDENTIAL",
+    "required_corroboration_tags": ["personal_identifier"],
+    "strict_tags_only": true
+  },
+  "false_positive_reduction": {
+    "min_context_window": 120,
+    "exclude_if_no_keywords": false
+  }
+}

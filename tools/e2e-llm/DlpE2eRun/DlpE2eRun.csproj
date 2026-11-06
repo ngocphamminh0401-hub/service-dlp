@@ -1,0 +1,18 @@
+<!-- [Thay đổi] File mới: harness chạy thử end-to-end luồng thật (Pass 1 → Router → job vùng xám → LlmJobDispatcher →
+     LLM host thật) trên ~20 file có nhãn thật, đo độ chính xác / thời gian / CPU-RAM. Chỉ THAM CHIẾU DlpService (dùng
+     lại class thật), KHÔNG sửa DlpService, KHÔNG đụng DB / watch-folder thật (mọi thứ ghi vào thư mục tạm). -->
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>DlpE2eRun</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\..\DlpService\DlpService.csproj" />
+  </ItemGroup>
+
+</Project>

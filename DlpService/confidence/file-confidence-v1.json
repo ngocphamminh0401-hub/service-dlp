@@ -1,0 +1,119 @@
+{
+    "version":  "go-pha21-v1",
+    "notes":  [
+                  "Hệ số copy NGUYÊN từ D:\\dlp-classifier\\pha2out (pha4a_model.json, pha4_model.json, rule_precision_train.json, pha19_level_threshold.json, pha21_layer1_eval.json) — fit trên engine Go, chưa fit lại cho engine C#.",
+                  "phi(x;k) = 1 - exp(-x/k); sigmoid(z) = 1/(1+exp(-z)). Nhánh B: conf = sigmoid(platt_a * z + platt_b)."
+              ],
+    "min_length_bytes":  200,
+    "short_confidence":  0.95758733545457875,
+    "fallback_domain":  "hr",
+    "branch_a":  {
+                     "gamma0_by_domain":  {
+                                              "finance_banking":  5.039671691507594,
+                                              "healthcare":  3.9307481754219804,
+                                              "hr":  3.828210923670632,
+                                              "insurance":  3.956416235608304
+                                          },
+                     "risk_coef":  -9.73257569220592,
+                     "unstructured_numeric_coef":  -1.6655415667446714,
+                     "unstructured_numeric_k":  2.969031531531531,
+                     "empty_decisive_risk":  0.5
+                 },
+    "branch_b":  {
+                     "beta0_by_domain":  {
+                                             "finance_banking":  4.048871013981047,
+                                             "healthcare":  2.9223755450896083,
+                                             "hr":  2.5926392365068347,
+                                             "insurance":  3.2349657219832104
+                                         },
+                     "keyword_hit_no_match_primary":  {
+                                                          "coef":  -0.7907397418192279,
+                                                          "k":  5
+                                                      },
+                     "proximity_reject":  {
+                                              "coef":  -5.1240790949083586,
+                                              "k":  1.4393939393939394
+                                          },
+                     "level_gate_downgrade":  {
+                                                  "coef":  -0.972494555994348,
+                                                  "k":  1
+                                              },
+                     "unstructured_numeric_density":  {
+                                                          "coef":  -1.7145910532803059,
+                                                          "k":  0.6019306291430957
+                                                      },
+                     "identifier_volume_near_gate":  {
+                                                         "coef":  -2.3580441310145344,
+                                                         "k":  0.030709504685408295
+                                                     },
+                     "doc_context_discount_coef":  -1.4301825410420803,
+                     "platt_a":  1.1347363327181013,
+                     "platt_b":  -0.13719185693107511
+                 },
+    "precision_prior_default":  0.9,
+    "precision_prior_fp_prone":  0.7,
+    "fp_prone_rules":  [
+                           "bank_account_001",
+                           "credentials_001",
+                           "health_001"
+                       ],
+    "rule_precision":  {
+                           "phone_001":  0.2167,
+                           "internal_code_001":  0.484,
+                           "insurance_context_001":  0.5333,
+                           "fraud_transaction_flag_001":  0.6575,
+                           "hr_sexual_harassment_complaint_001":  0.7745,
+                           "vn_name_001":  0.8332,
+                           "social_insurance_001":  0.8369,
+                           "income_001":  0.8548,
+                           "biometric_001":  0.859,
+                           "contract_001":  0.8612,
+                           "dob_001":  0.8627,
+                           "vn_id_001":  0.8987,
+                           "tax_code_personal_001":  0.9091,
+                           "ethnicity_religion_political_001":  0.9167,
+                           "passport_001":  0.918,
+                           "vip_customer_001":  0.9224,
+                           "credit_card_001":  0.9231,
+                           "health_001":  0.9245,
+                           "swift_bic_001":  0.9286,
+                           "bank_account_001":  0.9323,
+                           "fin_credit_card_statement_001":  0.9329,
+                           "classified_doc_002":  0.9464,
+                           "fin_internal_branch_financials_001":  0.9545,
+                           "fin_compliance_report_001":  0.9615,
+                           "fin_account_statement_001":  0.9641,
+                           "hr_disciplinary_health_investigation_001":  0.9653,
+                           "otp_table_header_001":  0.9655,
+                           "fin_transfer_confirmation_001":  0.9717,
+                           "hr_offer_letter_001":  0.9742,
+                           "business_internal_specific_001":  0.9768,
+                           "email_001":  0.9804,
+                           "hr_internal_business_001":  0.9861,
+                           "classified_doc_001":  0.9873,
+                           "business_internal_001":  0.9895,
+                           "hr_internal_chat_protected_attributes_001":  0.9912,
+                           "watermark_001":  0.9922,
+                           "iban_001":  0.9923,
+                           "fin_internal_chat_customer_data_001":  0.9939,
+                           "hr_party_membership_dossier_001":  0.9946,
+                           "hr_workplace_accident_investigation_001":  0.9955,
+                           "fraud_investigation_001":  0.9983,
+                           "cvv_001":  0.9986,
+                           "healthcare_internal_business_001":  0.9987,
+                           "otp_auth_001":  0.9988
+                       },
+    "always_secret_rules":  [
+                                "credit_card_001",
+                                "cvv_001",
+                                "otp_auth_001",
+                                "credentials_001",
+                                "fraud_investigation_001"
+                            ],
+    "keep_threshold_by_level":  {
+                                    "Public":  0.889,
+                                    "Internal":  0.975,
+                                    "Confidential":  0.961,
+                                    "Restricted":  0.001
+                                }
+}

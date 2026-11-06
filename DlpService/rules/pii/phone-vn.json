@@ -1,0 +1,60 @@
+{
+  "id": "phone_001",
+  "name": "PhoneVN",
+  "category": "pii",
+  "level": "INTERNAL",
+  "weight": 0.82,
+  "priority": 55,
+  "tags": ["pii", "phone", "contact_info", "vn_specific"],
+  "enabled": true,
+  "notes": [
+    "PII-003 - Số điện thoại Việt Nam theo quy hoạch số Bộ TT&TT (Thông tư 11/2013, cập nhật 2018). Di động: Viettel 032-039/086/096/097/098; Mobifone 070/076-079/089/090/093; Vinaphone 081-085/088/091/094; Vietnamobile 052/056/058/092; Gmobile/Reddi 055/059/099. Cố định: 02x (10 số từ 2018).",
+    "pattern_5 (hotline 1800/1900) override_level=PUBLIC vì đây LUÔN là số tổng đài/đường dây nóng theo quy hoạch số, KHÔNG BAO GIỜ là số điện thoại cá nhân — tín hiệu cấu trúc an toàn tuyệt đối, không cần gate. Xác nhận qua rule-attribution: 8 file PUBLIC (đường dây nóng y tế/ngân hàng công khai) từng bị đẩy sai lên INTERNAL.",
+    "override_level trên pattern_5 CHƯA được engine C# đọc (dead field cho tới khi mở rộng PatternDefinition) — hiện hotline 1800/1900 vẫn bị gán INTERNAL như số điện thoại thường.",
+    "pattern_1-4 dùng validators:[vn_phone] (Scanning/Validation/PhoneValidator.cs): chuẩn hoá +84/84 → 0; di động 10 số với đầu số đang cấp (danh sách ở ghi chú đầu + Itel 087 — regex rộng hơn, VD còn cho 053/054/057/080/095), cố định 11 số với mã vùng 024/028/02xx hợp lệ; loại số giả kiểu ví dụ (7 số cuối giống nhau hoặc tăng/giảm đều: 0900000000, 0912345678, 0987654321). Là BỘ LỌC, không phải checksum → không tính là bằng chứng cho level_gate. pattern_5 (1800/1900) không gắn."
+  ],
+  "patterns": [
+    {
+      "regex": "\\b0(?:3[2-9]|5[2-9]|7[06-9]|8[0-9]|9[0-9])\\d{7}\\b",
+      "description": "Số di động VN dạng 0xxx — tất cả đầu số hợp lệ (2018+)",
+      "confidence": 0.90,
+      "context_required": false,
+      "validators": ["vn_phone"]
+    },
+    {
+      "regex": "\\+84(?:3[2-9]|5[2-9]|7[06-9]|8[0-9]|9[0-9])\\d{7}\\b",
+      "description": "Số di động VN dạng +84xxx (quốc tế)",
+      "confidence": 0.92,
+      "context_required": false,
+      "validators": ["vn_phone"]
+    },
+    {
+      "regex": "\\b84(?:3[2-9]|5[2-9]|7[06-9]|8[0-9]|9[0-9])\\d{7}\\b",
+      "description": "Số di động VN dạng 84xxx (không có dấu +)",
+      "confidence": 0.88,
+      "context_required": false,
+      "validators": ["vn_phone"]
+    },
+    {
+      "regex": "\\b02[0-9]\\d{8}\\b",
+      "description": "Số điện thoại cố định VN dạng 02x (10 chữ số)",
+      "confidence": 0.80,
+      "context_required": true,
+      "validators": ["vn_phone"]
+    },
+    {
+      "regex": "\\b1(?:800|900)\\d{4,6}\\b",
+      "description": "Số tổng đài 1800/1900 VN",
+      "confidence": 0.70,
+      "context_required": true
+    }
+  ],
+  "keywords": {
+    "primary": ["điện thoại", "SĐT", "số máy", "số điện thoại", "di động", "mobile", "phone", "tel", "liên lạc", "liên hệ"],
+    "secondary": ["hotline", "zalo", "số Zalo", "Zalo/Viber", "Viber", "fax", "ext", "số máy lẻ", "số nội bộ", "cell", "contact", "gọi", "OTP", "SMS", "nhắn tin", "xác thực số điện thoại"]
+  },
+  "false_positive_reduction": {
+    "min_context_window": 100,
+    "exclude_if_no_keywords": false
+  }
+}

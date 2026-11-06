@@ -1,0 +1,48 @@
+{
+  "id": "fin_internal_chat_customer_data_001",
+  "name": "FIN-015 Chat nội bộ tiết lộ dữ liệu tài khoản khách hàng",
+  "category": "financial",
+  "level": "CONFIDENTIAL",
+  "weight": 0.88,
+  "priority": 88,
+  "tags": ["financial", "internal_disclosure", "unauthorized_channel", "pii"],
+  "enabled": true,
+  "notes": [
+    "FIN-015 - Trao đổi nội bộ nhân viên tiết lộ số dư/lịch sử GD khách hàng qua kênh chat không chính thức (Slack/Teams/chat công ty) thay vì hệ thống core banking có kiểm soát/audit trail.",
+    "ĐÃ HẠ TỪ SECRET XUỐNG CONFIDENTIAL sau đối chiếu dữ liệu thật (eval_confusion.go --domain finance_banking): rule ban đầu SECRET đẩy sai 55/76 file — chat nội bộ tra cứu tài khoản (tên+số TK+số dư, CHƯA xác nhận AML/vi phạm) chỉ ở mức CONFIDENTIAL, cùng logic fraud_transaction_flag_001.",
+    "Cần corroboration NGHIÊM: chỉ có nhãn vai trò (CSKH/Giao dịch viên) không đủ — bắt buộc phải có SỐ DƯ hoặc SỐ TÀI KHOẢN cụ thể (pattern_2/pattern_3) xuất hiện cùng chunk. pattern_1 đứng một mình (conf=0.70) từng khớp nhầm 22 file PUBLIC (kịch bản đào tạo/mẫu chat CSKH không có số liệu khách hàng thật) — nên chỉ pattern_1 bị gate (fallback INTERNAL), pattern_2/3 là bằng chứng số dư/số TK thật, đủ mạnh đứng một mình."
+  ],
+  "patterns": [
+    {
+      "regex": "(?i)\\((?:CSKH|Giao\\s*d[ịi]ch\\s*vi[êe]n|Tr[ưu][ởo]ng\\s*nh[óo]m|Ch[ăa]m\\s*s[óo]c\\s*kh[áa]ch\\s*h[àa]ng)\\)",
+      "description": "FIN-015a Nhãn vai trò nhân viên trong chat nội bộ",
+      "confidence": 0.70,
+      "context_required": true
+    },
+    {
+      "regex": "(?i)s[ốo]\\s*d[ưu]\\s*(?:sau\\s*GD|hi[ệe]n\\s*t[ạa]i|t[àa]i\\s*kho[ảa]n)\\s*(?:l[àa]|hi[ệe]n\\s*l[àa])?\\s*[:]?\\s*[\\d.,]+\\s*(?:VND|VN[ĐD])",
+      "description": "FIN-015b Số dư tài khoản khách hàng tiết lộ trong chat",
+      "confidence": 0.80,
+      "context_required": false
+    },
+    {
+      "regex": "\\b\\d{8,}[xX]{1,3}\\b",
+      "description": "FIN-015c Số tài khoản che không đúng chuẩn (>=8 số hiển thị)",
+      "confidence": 0.75,
+      "context_required": true
+    }
+  ],
+  "keywords": {
+    "primary": ["kiểm tra lại thông tin tài khoản", "lịch sử giao dịch", "số dư", "xác nhận giao dịch"],
+    "secondary": ["giao dịch viên", "trưởng nhóm", "CSKH", "không có dấu hiệu bất thường", "cần bổ sung xác minh"]
+  },
+  "level_gate": {
+    "require_corroboration": true,
+    "fallback_level": "INTERNAL",
+    "applies_to_patterns": ["pattern_1"]
+  },
+  "false_positive_reduction": {
+    "min_context_window": 120,
+    "exclude_if_no_keywords": false
+  }
+}

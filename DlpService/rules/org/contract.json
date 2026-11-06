@@ -1,0 +1,40 @@
+{
+  "id": "contract_001",
+  "name": "ORG-003 Mã số hợp đồng / PO",
+  "category": "org",
+  "level": "CONFIDENTIAL",
+  "weight": 0.78,
+  "priority": 60,
+  "tags": ["org", "contract", "nda", "agreement", "purchase_order"],
+  "enabled": true,
+  "notes": [
+    "ORG-003 + Org Contract - Tài liệu hợp đồng/thỏa thuận bảo mật + Mã hợp đồng/PO. Kết hợp 2 loại phát hiện trong 1 rule: keyword-based (nhận dạng tài liệu hợp đồng qua từ khóa) + pattern-based (mã số hợp đồng/Purchase Order).",
+    "keywords.primary chỉ giữ cụm ĐẶC TRƯNG hợp đồng thật (2+ từ) — bỏ 'hợp đồng'/'contract'/'agreement'/'thỏa thuận' đứng trần vì quá phổ biến (mã đơn hàng thương mại điện tử, email marketing 'PO-123456' đều dễ có các từ này lân cận mà không phải hợp đồng thật). primary/secondary chỉ ảnh hưởng độ lớn context boost, KHÔNG có tác dụng bắt buộc (keyword_logic.min_primary là dead field) — rào chắn thật nằm ở level_gate.",
+    "Mã hợp đồng/PO là định dạng CHUNG (dễ trùng số hóa đơn, mã đơn hàng công khai) — 1 lần khớp đơn lẻ, không lặp lại, không có rule khác hỗ trợ không nên tự động CONFIDENTIAL.",
+    "escalation (khi có từ khóa quốc phòng/an ninh quốc gia/tối mật... đi kèm mã hợp đồng -> escalate SECRET) đã được engine C# đọc (Bậc 3 #1): tìm từ khoá trong vùng min_context_window quanh mã hợp đồng, chỉ nâng không hạ; từ khoá escalation cũng được tính là bằng chứng củng cố cho level_gate."
+  ],
+  "patterns": [
+    {
+      "regex": "(?i)\\b(?:HĐ|HD|PO|CONTRACT|CTR)[/\\-]?\\s*\\d{4,12}(?:[/\\-][A-Z0-9]+)*\\b",
+      "description": "ORG-003 theo spec PDF",
+      "confidence": 0.90,
+      "context_required": false
+    }
+  ],
+  "keywords": {
+    "primary": ["hợp đồng số", "số hợp đồng", "contract no", "mã hợp đồng", "NDA", "non-disclosure", "thoả thuận bảo mật", "hợp đồng dịch vụ", "hợp đồng mua bán"],
+    "secondary": ["hợp đồng", "contract", "agreement", "thỏa thuận", "bảo mật", "confidential", "cam kết", "điều khoản", "terms", "conditions", "phụ lục", "annex", "appendix", "hiệu lực", "effective date", "chấm dứt", "termination", "vi phạm", "breach", "bồi thường", "penalty", "nghĩa vụ", "obligation", "quyền và nghĩa vụ", "purchase order", "đơn đặt hàng", "báo giá", "quotation"]
+  },
+  "false_positive_reduction": {
+    "min_context_window": 100,
+    "exclude_if_no_keywords": true
+  },
+  "level_gate": {
+    "require_corroboration": true,
+    "fallback_level": "INTERNAL"
+  },
+  "escalation": {
+    "keywords": ["quốc phòng", "an ninh quốc gia", "tối mật", "tài liệu mật", "bí mật nhà nước"],
+    "escalate_to": "SECRET"
+  }
+}

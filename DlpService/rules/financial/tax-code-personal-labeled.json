@@ -1,0 +1,38 @@
+{
+  "id": "tax_code_personal_001",
+  "name": "TaxCodePersonalLabeled",
+  "category": "financial",
+  "level": "CONFIDENTIAL",
+  "weight": 0.85,
+  "priority": 62,
+  "tags": ["financial", "tax_code", "pii_tax", "personal_id", "financial_personal"],
+  "enabled": true,
+  "llm_policy": "never",
+  "notes": [
+    "FIN/PII - Mã số thuế cá nhân Việt Nam (MST CN), pattern_2: có label rõ ràng ('mã số thuế cá nhân:', 'MST cá nhân', 'TNCN số', 'mã số cá nhân' + dấu ':'/'=' + 13 số) nên MIỄN GATE (exempt_patterns trong PDF) — khác pattern_1 dãy 13 số trần cần gate ở TaxCodePersonalBare.",
+    "context_required=false vì cú pháp label đã đủ đặc trưng để không cần thêm keyword window riêng.",
+    "validators:[mst] (Scanning/Validation/TaxCodeValidator.cs): validator tự bỏ phần nhãn, chỉ xét 13 chữ số (10 số MST + 3 số phụ thuộc)."
+  ],
+  "patterns": [
+    {
+      "regex": "(?i)(?:mã\\s*số\\s*thuế\\s*cá\\s*nhân|MST\\s*cá\\s*nhân|TNCN\\s*số|mã\\s*số\\s*cá\\s*nhân)\\s*[:=]?\\s*\\d{13}",
+      "description": "MST cá nhân có label rõ ràng",
+      "confidence": 0.92,
+      "context_required": false,
+      "validators": ["mst"]
+    }
+  ],
+  "keywords": {
+    "primary": ["mã số thuế cá nhân", "MST cá nhân", "mã số cá nhân", "tax identification number", "TIN cá nhân", "TNCN", "thuế thu nhập cá nhân", "personal income tax", "personal tax"],
+    "secondary": ["cục thuế", "quyết toán thuế", "kê khai thuế", "hoàn thuế TNCN", "phiếu lương", "thu nhập chịu thuế", "khấu trừ thuế"]
+  },
+  "false_positive_reduction": {
+    "min_context_window": 200,
+    "exclude_if_no_keywords": true
+  },
+  "proximity_window": {
+    "max_chars": 60,
+    "same_sentence_required": true,
+    "keyword_scope": "primary"
+  }
+}

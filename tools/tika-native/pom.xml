@@ -1,0 +1,100 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- [Thay đổi] File mới (Bước 2.2): project Java bọc Apache Tika để (sau này) biên dịch thành DLL native bằng GraalVM.
+     Chỉ chọn các module Tika cần dùng thay vì cả gói "tika-parsers-standard-package": gói đầy đủ kéo thêm thư viện xử lý
+     ảnh/AWT, vốn khó với native-image. Danh sách module có thể phải thêm bớt khi thử từng định dạng. -->
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <groupId>dlp.tika</groupId>
+  <artifactId>tika-native</artifactId>
+  <version>0.1.0</version>
+  <packaging>jar</packaging>
+
+  <properties>
+    <maven.compiler.release>21</maven.compiler.release>
+    <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+    <tika.version>3.3.2</tika.version>
+  </properties>
+
+  <dependencies>
+    <!-- Lõi Tika: nhận dạng loại file, giao diện parser. Các module parser khai báo nó ở dạng "provided" nên phải tự thêm -->
+    <dependency>
+      <groupId>org.apache.tika</groupId>
+      <artifactId>tika-core</artifactId>
+      <version>${tika.version}</version>
+    </dependency>
+    <!-- txt/csv: nhận dạng bảng mã -->
+    <dependency>
+      <groupId>org.apache.tika</groupId>
+      <artifactId>tika-parser-text-module</artifactId>
+      <version>${tika.version}</version>
+    </dependency>
+    <!-- Office: doc, docx, xls, xlsx, ppt, pptx (qua Apache POI) -->
+    <dependency>
+      <groupId>org.apache.tika</groupId>
+      <artifactId>tika-parser-microsoft-module</artifactId>
+      <version>${tika.version}</version>
+    </dependency>
+    <!-- PDF (qua Apache PDFBox) -->
+    <dependency>
+      <groupId>org.apache.tika</groupId>
+      <artifactId>tika-parser-pdf-module</artifactId>
+      <version>${tika.version}</version>
+    </dependency>
+    <!-- Email: eml (kèm đọc file đính kèm) -->
+    <dependency>
+      <groupId>org.apache.tika</groupId>
+      <artifactId>tika-parser-mail-module</artifactId>
+      <version>${tika.version}</version>
+    </dependency>
+    <!-- [Thay đổi] Bước 2.3: angus-activation (do Tika kéo vào) có đoạn hỗ trợ native-image riêng, đòi lớp jakarta.mail.Part
+         lúc build; classpath thiếu nên native-image báo NoClassDefFoundError. Chỉ cần thư viện API (giao diện), không cần bản cài đặt. -->
+    <dependency>
+      <groupId>jakarta.mail</groupId>
+      <artifactId>jakarta.mail-api</artifactId>
+      <version>2.1.3</version>
+    </dependency>
+    <!-- [Thay đổi] Bước 2.5: SDK của GraalVM (annotation @CEntryPoint, kiểu con trỏ C) để viết lớp vỏ native NativeApi.
+         "provided": chỉ cần lúc biên dịch, bản thật nằm sẵn trong native-image -->
+    <dependency>
+      <groupId>org.graalvm.sdk</groupId>
+      <artifactId>nativeimage</artifactId>
+      <version>25.0.2</version>
+      <scope>provided</scope>
+    </dependency>
+    <!-- Tika dùng SLF4J để ghi log; bản "nop" tắt log, đỡ cảnh báo thiếu bộ ghi log và nhẹ cho bản native -->
+    <dependency>
+      <groupId>org.slf4j</groupId>
+      <artifactId>slf4j-nop</artifactId>
+      <version>2.0.16</version>
+    </dependency>
+  </dependencies>
+
+  <build>
+    <plugins>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-compiler-plugin</artifactId>
+        <version>3.13.0</version>
+      </plugin>
+      <!-- Chép mọi thư viện phụ thuộc vào target/libs: dùng cho "java -cp" khi thử trên JVM và cho native-image sau này -->
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-dependency-plugin</artifactId>
+        <version>3.8.1</version>
+        <executions>
+          <execution>
+            <id>copy-libs</id>
+            <phase>package</phase>
+            <goals><goal>copy-dependencies</goal></goals>
+            <configuration>
+              <outputDirectory>${project.build.directory}/libs</outputDirectory>
+            </configuration>
+          </execution>
+        </executions>
+      </plugin>
+    </plugins>
+  </build>
+</project>

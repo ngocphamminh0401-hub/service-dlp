@@ -1,0 +1,20 @@
+<!-- [Thay đổi] File mới: công cụ SINH FILE TEST cho benchmark Tika (8 định dạng: txt, csv, docx, pptx, xlsx, xls, pdf, eml).
+     Mỗi file chứa giá trị "đánh dấu" tổng hợp ở nhiều vị trí (thân, bảng, header/footer, ghi chú...) và được ghi vào
+     manifest.json làm đáp án đúng (ground truth) để đo chất lượng trích text. Dữ liệu hoàn toàn giả, không phải dữ liệu thật.
+     docx/pptx/xlsx tự ghi bằng ZIP + XML thô; pdf dùng PdfPig; .xls gọi gen_xls.py (xlwt). -->
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>DlpTestGen</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="PdfPig" Version="0.1.11" />
+    <None Include="gen_xls.py" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+</Project>

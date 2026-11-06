@@ -1,0 +1,25 @@
+<!-- [Thay đổi] File mới (đánh giá xử lý đồng thời — phần A): đo pipeline của service ở nhiều mức song song (1..64 luồng) trong
+     cùng tiến trình: thông lượng, độ trễ, lỗi, RAM/thread đỉnh, và kiểm tra an toàn đa luồng (kết quả trùng với chạy tuần tự, đủ bản
+     ghi DB). Tham chiếu thẳng DlpService để dùng ĐÚNG reader/scanner/engine/FileConfidence/ResultStore của service. -->
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>DlpConcurrencyBench</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\..\DlpService\DlpService.csproj" />
+  </ItemGroup>
+
+  <!-- [Thay đổi] Đo lại với Tika native: tham số extractor (legacy hoặc tika) dùng chung giữa các công cụ đo -->
+  <ItemGroup>
+    <Compile Include="..\..\shared\ExtractorSwitch.cs" Link="ExtractorSwitch.cs" />
+    <!-- [Thay đổi] buổi 15: tắt hạ xung EcoQoS khi chạy nền -->
+    <Compile Include="..\..\shared\PowerThrottling.cs" Link="PowerThrottling.cs" />
+  </ItemGroup>
+
+</Project>

@@ -1,0 +1,58 @@
+{
+  "id": "insurance_context_001",
+  "name": "ORG-008 Ngữ cảnh hồ sơ bồi thường/claim bảo hiểm",
+  "category": "org",
+  "level": "CONFIDENTIAL",
+  "weight": 0.80,
+  "priority": 45,
+  "tags": ["org", "insurance_context", "insurance_claim"],
+  "enabled": true,
+  "notes": [
+    "ORG-008 - Ngữ cảnh hồ sơ bồi thường/claim bảo hiểm (tag phụ trợ). Rule này KHÔNG tự thân quan trọng — mục đích DUY NHẤT là gán tag 'insurance_context' cho compound rule 'Health + Financial + Insurance Context = SECRET', thay thế compound 'Health+Financial=SECRET' đã gỡ (quá rộng, tự nổ trên bất kỳ file nào có cả sức khỏe + tài chính, VD hợp đồng lao động có mục BHYT + lương).",
+    "level: CONFIDENTIAL (không phải INTERNAL) là BẮT BUỘC: compound rule dùng min_component_level: CONFIDENTIAL áp dụng đồng nhất cho MỌI condition — nếu rule này ở INTERNAL, nó sẽ không bao giờ tự thỏa min_component_level của chính compound rule đó.",
+    "ĐÃ THỬ VÀ GỠ pattern 'bồi thường' đứng riêng: RẤT phổ biến trong 'Điều khoản/quy tắc bồi thường bảo hiểm' — loại tài liệu PUBLIC mẫu, không phải hồ sơ bồi thường thật. Bật pattern này khiến PUBLIC->CONFIDENTIAL tăng vọt (336->744/1600).",
+    "PHÁT HIỆN QUA PHÂN TÍCH DỮ LIỆU THẬT: dù đã gỡ 'bồi thường' bare, rule này vẫn là nguồn over-classify PUBLIC lớn NHẤT toàn ruleset — 1806/~3200 file-variant PUBLIC domain insurance bị đẩy sai CONFIDENTIAL, vì kiến trúc highest-sensitivity-wins khiến 1 match vẫn tự set FinalLevel=CONFIDENTIAL cho cả file bất kể compound rule có kích hoạt hay không.",
+    "required_corroboration_tags=[health] + strict_tags_only=true: AN TOÀN TUYỆT ĐỐI với vai trò 'tag phụ trợ' vì compound rule 'Health + Insurance Context = SECRET' đã BẮT BUỘC pii_health làm 1 điều kiện riêng — khi compound đó thật sự kích hoạt, gate này cũng tự thỏa, không mất case thật nào; chỉ chặn đúng trường hợp insurance_context_001 đứng MỘT MÌNH (không có dữ liệu y tế đi kèm). strict_tags_only bắt buộc vì nếu không, điều kiện 'counts>=2' vẫn là 1 nhánh OR độc lập mà văn bản điều khoản bảo hiểm PUBLIC rất dễ đạt >=2 (vd 'Hồ sơ yêu cầu bồi thường' + 'yêu cầu bồi thường' khớp cùng 1 cụm qua 2 pattern khác nhau).",
+    "required_corroboration_tags/strict_tags_only CHƯA được engine C# đọc (dead field cho tới khi mở rộng LevelGateDefinition) — hiện chỉ require_corroboration/fallback_level có tác dụng thật, nên gate hiện tại LỎNG HƠN thiết kế PDF cho tới khi engine được mở rộng."
+  ],
+  "patterns": [
+    {
+      "regex": "(?i)(?:bồi\\s*thường\\s*bảo\\s*hiểm|chi\\s*trả\\s*bảo\\s*hiểm|định\\s*phí\\s*bảo\\s*hiểm|hồ\\s*sơ\\s*(?:yêu\\s*cầu\\s*)?bồi\\s*thường|insurance\\s*claim|claim\\s*settlement|underwriting)",
+      "description": "Cụm từ hồ sơ claim/bồi thường/định phí bảo hiểm",
+      "confidence": 0.80,
+      "context_required": false
+    },
+    {
+      "regex": "(?i)yêu\\s*cầu\\s*bồi\\s*thường",
+      "description": "Yêu cầu bồi thường (claim đang xử lý)",
+      "confidence": 0.78,
+      "context_required": false
+    },
+    {
+      "regex": "(?i)(?:thẩm\\s*định\\s*bảo\\s*hiểm|thẩm\\s*định\\s*sức\\s*khỏe|thẩm\\s*định\\s*rủi\\s*ro|khám\\s*sức\\s*khỏe\\s*thẩm\\s*định|cấp\\s*hợp\\s*đồng\\s*bảo\\s*hiểm)",
+      "description": "Thẩm định bảo hiểm/sức khỏe/rủi ro (underwriting)",
+      "confidence": 0.78,
+      "context_required": false
+    },
+    {
+      "regex": "(?i)(?:khởi\\s*kiện|tranh\\s*chấp\\s*bảo\\s*hiểm|tố\\s*tụng\\s*bảo\\s*hiểm)",
+      "description": "Khởi kiện/tranh chấp/tố tụng bảo hiểm",
+      "confidence": 0.80,
+      "context_required": false
+    }
+  ],
+  "keywords": {
+    "primary": ["bồi thường", "yêu cầu bồi thường", "claim", "chi trả bảo hiểm", "định phí", "thẩm định bảo hiểm", "thẩm định sức khỏe", "thẩm định rủi ro", "khởi kiện", "tranh chấp bảo hiểm", "underwriting"],
+    "secondary": ["hợp đồng bảo hiểm", "phí bảo hiểm", "công ty bảo hiểm"]
+  },
+  "false_positive_reduction": {
+    "min_context_window": 100,
+    "exclude_if_no_keywords": true
+  },
+  "level_gate": {
+    "require_corroboration": true,
+    "fallback_level": "PUBLIC",
+    "required_corroboration_tags": ["health"],
+    "strict_tags_only": true
+  }
+}

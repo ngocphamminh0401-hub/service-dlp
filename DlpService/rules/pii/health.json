@@ -1,0 +1,136 @@
+{
+  "id": "health_001",
+  "name": "Dữ liệu y tế / sức khỏe cá nhân",
+  "category": "pii",
+  "level": "SECRET",
+  "weight": 0.90,
+  "priority": 85,
+  "tags": ["pii", "health", "medical_record", "sensitive_pii", "ndctn13", "pii_strong"],
+  "enabled": true,
+  "notes": [
+    "PII - Dữ liệu y tế/sức khỏe. NĐ 13/2023/NĐ-CP Điều 2 Khoản 4, GDPR Article 9, HIPAA (khi xử lý dữ liệu bệnh nhân nước ngoài) — dữ liệu cá nhân nhạy cảm đặc biệt, không thể khắc phục khi đã lộ.",
+    "Chỉ nhóm HEALTH_RESTRICTED (HIV, tâm thần, di truyền/ADN/gen, sản khoa/phá thai, pháp y — pattern_5/6/8) mới luôn SECRET đứng một mình. HEALTH_GENERAL (tên bệnh nhân + chẩn đoán/ICD/đơn thuốc/bệnh thông thường như ung thư, tiểu đường, tim mạch — các pattern còn lại) chỉ đạt CONFIDENTIAL — override_level trên từng pattern (CHƯA được engine C# đọc, xem ghi chú dưới) mã hóa phân tầng risk-based này trong lòng category pháp lý 'nhạy cảm'.",
+    "LƯU Ý PHÁP LÝ (đã cân nhắc, không phải bỏ sót): NĐ13/GDPR Điều 9 xếp TOÀN BỘ dữ liệu sức khỏe gắn định danh vào nhóm nhạy cảm, không phân biệt theo loại bệnh. Tách 2 tầng là cách tiếp cận risk-based phổ biến trong DLP thực tế — sàn tối thiểu CONFIDENTIAL cho MỌI dữ liệu sức khỏe gắn định danh vẫn được đảm bảo (rule.level=SECRET là trần, không rule nào override xuống PUBLIC/INTERNAL).",
+    "pattern_3 (chẩn đoán) dùng WHITELIST modifier cụ thể (sơ bộ/xác định/ban đầu/ra viện/y khoa/theo chỉ định/ICD-10) thay vì '.{0,20}[:=]' chung chung — tránh khớp 'Khoa Chẩn đoán hình ảnh' (tên khoa/phòng ban, không phải nhãn chẩn đoán bệnh nhân).",
+    "pattern_6/7: 'bệnh di truyền' ĐÃ DEMOTE xuống HEALTH_GENERAL (pattern_7 riêng, override CONFIDENTIAL) sau 2 vòng sửa bug phủ định: bare 'di truyền' và cả 'bệnh di truyền' đều bị PHỦ ĐỊNH trong 'Tiền sử gia đình: Không có ai mắc... bệnh di truyền' (câu hỏi sàng lọc thường quy) — RE2 không lookbehind nên không loại trừ được. Chỉ giữ SECRET cho 'xét nghiệm gen'/'di truyền học' (nhắc XÉT NGHIỆM/LĨNH VỰC cụ thể, không phải câu hỏi có/không dễ bị phủ định).",
+    "pattern_8 (khám nghiệm tử thi/nguyên nhân tử vong) KHÔNG dùng 'giấy chứng tử'/'trích lục khai tử' đứng riêng: đây là điều khoản THỦ TỤC phổ biến trong MỌI hợp đồng bảo hiểm nhân thọ CONFIDENTIAL bình thường ('Hồ sơ yêu cầu gồm: Giấy chứng tử (NẾU tử vong)...'), không phải bằng chứng có giấy chứng tử thật.",
+    "pattern_12/13 (bảng thanh toán BHYT, tiêu đề phiếu xét nghiệm) thêm để vá lỗ hổng: 11 pattern ban đầu bỏ sót hoàn toàn bảng LIỆT KÊ BỆNH NHÂN THẬT dạng cột (tên, số thẻ BHYT, ngày vào/ra viện) do cơ sở khám chữa bệnh gửi BHXH — khác 'DANH MỤC KỸ THUẬT... BHYT CHI TRẢ' (bảng giá công khai PUBLIC). pattern_12 dùng [\\s\\S]{0,60} (không phải [^\\n]) vì PDF ngắt dòng giữa cụm 'CHỮA\\nBỆNH BẢO HIỂM Y TẾ'.",
+    "level_gate: required_corroboration_tags=[personal_identifier] + strict_tags_only=true thay vì 'hasOtherStrongRule≥2 lần khớp' quá lỏng — pattern_1/2/4/11 (bệnh án, phiếu khám, kết quả xét nghiệm có label, mã ICD) là 4 pattern gây FP PUBLIC lớn nhất (184/204 file): khớp BẢNG GIÁ DỊCH VỤ Y TẾ, LỊCH TIÊM CHỦNG, tin tuyển dụng ('Khoa xét nghiệm:'), mã dịch vụ BHYT dạng ICD — văn bản công khai không gắn bệnh nhân cụ thể.",
+    "negation_filter: 2 nhóm trigger_words gộp chung — phủ định tiền sử bệnh ('không có tiền sử', cho pattern_7) và generic_content_signals ('phòng ngừa', 'cẩm nang', 'tờ rơi', 'infographic'... cho pattern_9, nội dung giáo dục/tuyên truyền không gắn 1 bệnh nhân cụ thể). window_chars=60 (không phải 30) vì trigger đứng đầu câu dài có thể không lọt window hẹp hơn tới match cuối câu.",
+    "override_level trên từng pattern, required_corroboration_tags, strict_tags_only CHƯA được engine C# đọc (dead field cho tới khi mở rộng RuleDefinition/PatternDefinition/LevelGateDefinition) — hiện toàn bộ pattern dùng chung rule.level=SECRET (không phân tầng CONFIDENTIAL/SECRET theo pattern) và gate chỉ dùng require_corroboration/fallback_level cơ bản."
+  ],
+  "patterns": [
+    {
+      "regex": "(?i)(?:bệnh\\s*án|medical\\s*record|hồ\\s*sơ\\s*bệnh\\s*án|patient\\s*record|health\\s*record)",
+      "description": "Bệnh án / Medical record",
+      "confidence": 0.88,
+      "context_required": false,
+      "override_level": "CONFIDENTIAL"
+    },
+    {
+      "regex": "(?i)(?:phiếu\\s*khám\\s*sức\\s*khỏe|phân\\s*loại\\s*sức\\s*khỏe|kết\\s*luận\\s*của\\s*bác\\s*sĩ|khám\\s*lâm\\s*sàng|kết\\s*quả\\s*cận\\s*lâm\\s*sàng)",
+      "description": "Phiếu khám sức khỏe / kết luận bác sĩ / khám lâm sàng",
+      "confidence": 0.85,
+      "context_required": false,
+      "override_level": "CONFIDENTIAL"
+    },
+    {
+      "regex": "(?i)(?:chẩn\\s*đoán(?:\\s*(?:sơ\\s*bộ|xác\\s*định|ban\\s*đầu|ra\\s*viện|y\\s*khoa|theo\\s*chỉ\\s*định|\\(?\\s*ICD[\\-\\s]?10\\s*\\)?))?|diagnosis|kết\\s*luận\\s*khám|kết\\s*quả\\s*khám)\\s*[:=]",
+      "description": "Chẩn đoán / Kết luận khám bệnh (có label, gồm biến thể sơ bộ/xác định/ICD-10/...)",
+      "confidence": 0.90,
+      "context_required": false,
+      "override_level": "CONFIDENTIAL"
+    },
+    {
+      "regex": "(?i)(?:kết\\s*quả\\s*xét\\s*nghiệm|xét\\s*nghiệm|lab\\s*result|test\\s*result|laboratory)\\s*[:=]",
+      "description": "Kết quả xét nghiệm (có label)",
+      "confidence": 0.88,
+      "context_required": false,
+      "override_level": "CONFIDENTIAL"
+    },
+    {
+      "regex": "(?i)(?:HIV|AIDS|tâm\\s*thần|psychiatric)",
+      "description": "Bệnh nhạy cảm cao (HIV/AIDS, tâm thần) — HEALTH_RESTRICTED",
+      "confidence": 0.85,
+      "context_required": true,
+      "override_level": "SECRET"
+    },
+    {
+      "regex": "(?i)(?:xét\\s*nghiệm\\s*gen|di\\s*truyền\\s*học|\\bADN\\b|\\bDNA\\b|sản\\s*khoa|phá\\s*thai|pháp\\s*y)",
+      "description": "Di truyền/ADN/sản khoa/phá thai/pháp y — HEALTH_RESTRICTED",
+      "confidence": 0.83,
+      "context_required": true,
+      "override_level": "SECRET"
+    },
+    {
+      "regex": "(?i)bệnh\\s*di\\s*truyền",
+      "description": "Bệnh di truyền (nhắc chung, không phân biệt phủ định) — HEALTH_GENERAL",
+      "confidence": 0.75,
+      "context_required": false,
+      "override_level": "CONFIDENTIAL"
+    },
+    {
+      "regex": "(?i)(?:khám\\s*nghiệm\\s*tử\\s*thi|nguyên\\s*nhân\\s*tử\\s*vong)",
+      "description": "Khám nghiệm tử thi/nguyên nhân tử vong — HEALTH_RESTRICTED (pháp y)",
+      "confidence": 0.83,
+      "context_required": false,
+      "override_level": "SECRET"
+    },
+    {
+      "regex": "(?i)(?:ung\\s*thư|cancer|u\\s*ác\\s*tính|malignant|viêm\\s*gan\\s*[ABCDE]|hepatitis|lao\\s*phổi|tuberculosis|tiểu\\s*đường|diabetes|tim\\s*mạch|cardiovascular|đột\\s*quỵ|stroke|thận\\s*mãn|chronic\\s*kidney|suy\\s*thận|renal\\s*failure)",
+      "description": "Tên bệnh thông thường (ung thư, tiểu đường, tim mạch, ...) — HEALTH_GENERAL",
+      "confidence": 0.82,
+      "context_required": true,
+      "override_level": "CONFIDENTIAL"
+    },
+    {
+      "regex": "(?i)(?:đơn\\s*thuốc|toa\\s*thuốc|prescription|thuốc\\s*điều\\s*trị|medication|dosage|liều\\s*dùng)\\s*[:=]",
+      "description": "Đơn thuốc / Prescription (có label)",
+      "confidence": 0.85,
+      "context_required": false,
+      "override_level": "CONFIDENTIAL"
+    },
+    {
+      "regex": "\\b[A-Z]\\d{2}(?:\\.\\d{1,4})?\\b",
+      "description": "Mã ICD-10/ICD-11 (vd: C34.1, F32.0) — chỉ dùng với keyword y tế",
+      "confidence": 0.70,
+      "context_required": true,
+      "override_level": "CONFIDENTIAL"
+    },
+    {
+      "regex": "(?i)(?:thanh\\s*toán|quyết\\s*toán)(?:\\s*/\\s*(?:thanh\\s*toán|quyết\\s*toán))?\\s*chi\\s*phí\\s*khám[\\s\\S]{0,60}bảo\\s*hiểm\\s*y\\s*tế",
+      "description": "Bảng tổng hợp thanh toán/quyết toán chi phí khám chữa bệnh BHYT",
+      "confidence": 0.85,
+      "context_required": false,
+      "override_level": "CONFIDENTIAL"
+    },
+    {
+      "regex": "(?i)phiếu\\s*kết\\s*quả\\s*xét\\s*nghiệm",
+      "description": "Phiếu kết quả xét nghiệm (tiêu đề văn bản, không cần label ':')",
+      "confidence": 0.85,
+      "context_required": false,
+      "override_level": "CONFIDENTIAL"
+    }
+  ],
+  "keywords": {
+    "primary": ["bệnh án", "phiếu khám sức khỏe", "phân loại sức khỏe", "kết luận của bác sĩ", "khám lâm sàng", "kết quả cận lâm sàng", "khám nghiệm tử thi", "nguyên nhân tử vong", "y tế", "sức khỏe", "medical", "bệnh nhân", "patient", "chẩn đoán", "diagnosis", "kết quả xét nghiệm", "lab result", "phòng khám", "bệnh viện", "hospital", "clinic", "health record", "hồ sơ bệnh án", "tiền sử bệnh", "medical history"],
+    "secondary": ["thuốc", "điều trị", "treatment", "xét nghiệm", "đơn thuốc", "prescription", "bác sĩ", "doctor", "phẫu thuật", "surgery", "nhập viện", "xuất viện", "ICD", "BHYT", "bảo hiểm y tế", "khám bệnh"]
+  },
+  "false_positive_reduction": {
+    "min_context_window": 200,
+    "exclude_if_no_keywords": true
+  },
+  "level_gate": {
+    "require_corroboration": true,
+    "fallback_level": "PUBLIC",
+    "applies_to_patterns": ["pattern_1", "pattern_2", "pattern_4", "pattern_7", "pattern_9", "pattern_11", "pattern_12", "pattern_13"],
+    "required_corroboration_tags": ["personal_identifier"],
+    "strict_tags_only": true
+  },
+  "negation_filter": {
+    "window_chars": 60,
+    "trigger_words": ["không có tiền sử", "không mắc", "không ghi nhận", "tiền sử gia đình không có", "phòng ngừa", "cẩm nang", "kiến thức", "tuyên truyền", "khuyến cáo", "tờ rơi", "infographic", "hỏi đáp", "Q&A", "những điều cần biết", "dấu hiệu nhận biết"],
+    "action": "downgrade_to_gate",
+    "applies_to_patterns": ["pattern_1", "pattern_2", "pattern_3", "pattern_4", "pattern_7", "pattern_8", "pattern_9"]
+  }
+}

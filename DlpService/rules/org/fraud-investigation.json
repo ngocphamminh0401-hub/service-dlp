@@ -1,0 +1,64 @@
+{
+  "id": "fraud_investigation_001",
+  "name": "ORG-006 Điều tra gian lận / AML / hình sự",
+  "category": "org",
+  "level": "SECRET",
+  "weight": 0.95,
+  "priority": 93,
+  "tags": ["org", "criminal_aml", "fraud", "investigation", "aml", "security_critical"],
+  "enabled": true,
+  "notes": [
+    "ORG-006 - Điều tra gian lận/AML/hình sự (CRIMINAL_AML). Theo tài liệu gốc Phần 3 Bước 1: CRIMINAL_AML luôn RESTRICTED bất kể ngữ cảnh (GDPR Điều 10) — dữ liệu hình sự/điều tra gian lận rủi ro cao nhất, không cần lặp lại hay có PII/financial đi kèm mới coi là nghiêm trọng. Vì vậy KHÔNG dùng level_gate — một lần nhắc 'hỗ trợ điều tra', 'rửa tiền' đã đủ là bằng chứng. Áp dụng cho mọi domain (không chỉ finance_banking).",
+    "ĐÃ CHUYỂN 'giao dịch đáng ngờ/bất thường' và 'nghi ngờ/nghi vấn rửa tiền/gian lận' sang rule riêng (fraud_transaction_flag_001, có level_gate): các cụm này rất dễ bị PHỦ ĐỊNH ('Không có giao dịch bất thường') mà regex không phân biệt được (RE2/Go regexp không hỗ trợ lookbehind để loại trừ 'không' đứng trước) — khác 'rửa tiền'/'khởi tố'/'điều tra gian lận' (hiếm khi bị phủ định trong hội thoại thường ngày).",
+    "ĐÃ THU HẸP 'rửa tiền' bare xuống chỉ giữ SECRET cho diễn đạt CHỈ RÕ có vụ việc cụ thể ('phát hiện/tố giác/vụ án rửa tiền'): bare 'rửa tiền'/'phòng chống rửa tiền' đẩy sai 113/114 file INTERNAL lên RESTRICTED — 92% chỉ là nhắc TÊN CHÍNH SÁCH AML bắt buộc theo luật phải xuất hiện trong mọi văn bản tuân thủ/hợp đồng/quy trình ngân hàng.",
+    "pattern_4 (báo cáo giao dịch đáng ngờ - tiêu đề STR) ĐÃ BỎ (?i), chỉ khớp chữ HOA toàn bộ: bản (?i) khớp cả câu THỐNG KÊ thường gặp trong báo cáo tuân thủ định kỳ ('Số lượng báo cáo giao dịch đáng ngờ đã gửi: 04 báo cáo') — không phải bản thân STR (Suspicious Transaction Report) — gây 56/68 file INTERNAL bị đẩy sai RESTRICTED. Văn bản STR thật luôn có cụm này dưới dạng TIÊU ĐỀ VIẾT HOA đứng riêng 1 dòng đầu văn bản.",
+    "pattern_5 (khởi tố/tiền án/tiền sự/án tích) dùng \\p{L}\\p{N} thay vì \\b: \\b trong Go regexp/RE2 chỉ nhận diện ranh giới từ theo ASCII, 3/4 cụm bắt đầu/kết thúc bằng nguyên âm có dấu nên \\b không bao giờ khớp — .NET regex hỗ trợ \\p{L}\\p{N} đầy đủ nên giữ nguyên cú pháp này, hoạt động đúng trên engine C#.",
+    "negation_filter (suppress 'không có' + pattern_5): 'án tích' khớp nhầm tiêu chí TUYỂN DỤNG chuẩn ('Sức khỏe tốt, không có án tích') — yêu cầu lý lịch tư pháp trong sạch khi ứng tuyển, KHÔNG phải bằng chứng có án tích thật."
+  ],
+  "patterns": [
+    {
+      "regex": "(?i)(?:hỗ\\s*trợ|phục\\s*vụ|phối\\s*hợp)\\s*(?:công\\s*tác\\s*)?điều\\s*tra",
+      "description": "ORG-006a hỗ trợ/phục vụ điều tra",
+      "confidence": 0.90,
+      "context_required": false
+    },
+    {
+      "regex": "(?i)điều\\s*tra\\s*(?:nghi\\s*vấn\\s*|nghi\\s*ngờ\\s*)?(?:gian\\s*lận|hình\\s*sự|tội\\s*phạm)",
+      "description": "ORG-006b điều tra gian lận/hình sự/tội phạm",
+      "confidence": 0.93,
+      "context_required": false
+    },
+    {
+      "regex": "(?i)(?:ph[áa]t\\s*hi[ệe]n|t[ốo]\\s*gi[áa]c|v[ụu]\\s*[áa]n)\\s*(?:h[àa]nh\\s*vi\\s*)?r[ửu]a\\s*ti[ềe]n",
+      "description": "ORG-006d Phát hiện/tố giác/vụ án rửa tiền (cụ thể, không phải tên chính sách)",
+      "confidence": 0.90,
+      "context_required": false
+    },
+    {
+      "regex": "B[ÁA]O\\s*C[ÁA]O\\s*GIAO\\s*D[ỊI]CH\\s*Đ[ÁA]NG\\s*NG[ỜO]|\\d+\\s*/\\s*AML\\s*/\\s*\\d{4}",
+      "description": "ORG-006g Báo cáo giao dịch đáng ngờ (tiêu đề STR viết hoa) / số báo cáo AML",
+      "confidence": 0.93,
+      "context_required": false
+    },
+    {
+      "regex": "(?i)(?:^|[^\\p{L}\\p{N}])(?:khởi\\s*tố|tiền\\s*án|tiền\\s*sự|án\\s*tích)(?:[^\\p{L}\\p{N}]|$)",
+      "description": "ORG-006e khởi tố / tiền án / tiền sự / án tích",
+      "confidence": 0.92,
+      "context_required": false
+    }
+  ],
+  "keywords": {
+    "primary": ["hỗ trợ điều tra", "phục vụ điều tra", "điều tra gian lận", "rửa tiền", "khởi tố", "tiền án", "tiền sự", "án tích"],
+    "secondary": ["cơ quan điều tra", "cơ quan công an", "viện kiểm sát", "AML", "phòng chống rửa tiền", "gian lận", "khách hàng VIP", "nhật ký đăng nhập", "nhật ký giao dịch"]
+  },
+  "false_positive_reduction": {
+    "min_context_window": 80,
+    "exclude_if_no_keywords": false
+  },
+  "negation_filter": {
+    "window_chars": 20,
+    "trigger_words": ["không có"],
+    "action": "suppress",
+    "applies_to_patterns": ["pattern_5"]
+  }
+}

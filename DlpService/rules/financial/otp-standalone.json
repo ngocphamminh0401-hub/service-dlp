@@ -1,0 +1,34 @@
+{
+  "id": "otp_auth_001",
+  "name": "OtpStandalone",
+  "category": "financial",
+  "level": "SECRET",
+  "weight": 0.95,
+  "priority": 96,
+  "tags": ["financial", "auth_secret", "otp", "pin", "security_critical"],
+  "enabled": true,
+  "notes": [
+    "FIN-009d - OTP đứng một mình cạnh chuỗi số. Confidence thấp hơn 3 pattern có label rõ ràng (xem OtpLabeled), cần keyword hỗ trợ để tránh khớp 'OTP' trong tài liệu hướng dẫn chung không có mã cụ thể."
+  ],
+  "patterns": [
+    {
+      "regex": "(?i)\\bOTP\\b[^\\d]{0,30}\\d{4,8}\\b",
+      "description": "FIN-009d OTP standalone + chuỗi số",
+      "confidence": 0.88,
+      "context_required": true
+    }
+  ],
+  "keywords": {
+    "primary": ["mã OTP", "OTP code", "mã PIN giao dịch", "mã xác thực giao dịch", "one-time password"],
+    "secondary": ["OTP", "PIN", "xác thực giao dịch", "xác thực 2 yếu tố", "2FA", "mã bảo mật giao dịch"]
+  },
+  "false_positive_reduction": {
+    "min_context_window": 60,
+    "exclude_if_no_keywords": false
+  },
+  "placeholder_exclusion": {
+    "value_blocklist_patterns": ["^(0000|1234|123456|111111|000000|999999)$"],
+    "doc_context_discount_keywords": ["hướng dẫn", "ví dụ", "cách sử dụng", "training", "tutorial", "demo"],
+    "doc_context_discount_factor": 0.4
+  }
+}

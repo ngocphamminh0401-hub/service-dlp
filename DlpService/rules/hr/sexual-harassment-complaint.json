@@ -1,0 +1,55 @@
+{
+  "id": "hr_sexual_harassment_complaint_001",
+  "name": "HR-020 Hồ sơ/đơn khiếu nại quấy rối tình dục nơi làm việc",
+  "category": "hr",
+  "level": "RESTRICTED",
+  "weight": 0.92,
+  "priority": 92,
+  "tags": ["hr", "sexual_harassment", "disciplinary_case", "health_data"],
+  "enabled": true,
+  "notes": [
+    "HR-020 - Hồ sơ xử lý khiếu nại quấy rối tình dục tại nơi làm việc. Các hồ sơ này thường bị phân loại INTERNAL vì cụm 'khiếu nại'/'quấy rối' xuất hiện tràn lan trong tài liệu chính sách, email nhắc nhở chung, hoặc bộ quy tắc ứng xử — không riêng gì hồ sơ vụ việc thật. Cần bắt được ĐÚNG cấu trúc hồ sơ vụ việc cụ thể (mã số vụ việc, tổ xác minh, mốc quy trình, cam kết bảo mật) chứ không chỉ từ khóa chủ đề.",
+    "Rủi ro rò rỉ: gắn liền danh tính người khiếu nại/bị khiếu nại + tình tiết nhạy cảm (có thể kèm dữ liệu sức khỏe/nghỉ ốm như minh chứng) -> luôn RESTRICTED ngay cả khi kết luận 'không đủ căn cứ vi phạm'.",
+    "Kiểm chứng trên dữ liệu thật: tiêu đề 'HỒ SƠ XỬ LÝ KHIẾU NẠI HÀNH VI QUẤY RỐI TÌNH DỤC TẠI NƠI LÀM VIỆC' (HR-020a) và mã vụ việc dạng 'HR-QR-2024-22' (HR-020b) đều khớp đúng quy ước thật trong dataset.",
+    "id dùng hậu tố mô tả + '_001' (không phải số thứ tự HR-020 trần) để tránh trùng prefix 'hr' với category khi engine tự tách tiền tố ruleID — giữ khả năng viết compound_rules nhắm riêng rule này sau này.",
+    "Corroboration bắt buộc: 1 từ 'quấy rối' đơn lẻ trong bộ quy tắc ứng xử/đào tạo không đủ. Cần đi kèm ít nhất 1 tín hiệu 'đây là 1 vụ việc cụ thể' (mã số vụ việc, tổ xác minh, mã nhân viên, hoặc tên người liên quan) để tránh nhầm với tài liệu chính sách/thông báo chung."
+  ],
+  "patterns": [
+    {
+      "regex": "(?i)hồ\\s*sơ\\s*(?:xử\\s*lý\\s*)?khiếu\\s*nại\\s*(?:về\\s*)?(?:hành\\s*vi\\s*)?quấy\\s*rối\\s*t[ìi]nh\\s*dục",
+      "description": "HR-020a Tiêu đề hồ sơ khiếu nại QRTD",
+      "confidence": 0.92,
+      "context_required": false
+    },
+    {
+      "regex": "(?i)mã\\s*(?:số\\s*)?vụ\\s*việc\\s*[:=]?\\s*(?:HR-QR|QRTD)[-\\/]?\\d{2,4}[-\\/]?\\d{2,4}",
+      "description": "HR-020b Mã số vụ việc khiếu nại QRTD",
+      "confidence": 0.90,
+      "context_required": false
+    },
+    {
+      "regex": "(?i)cam\\s*kết\\s*bảo\\s*mật\\s*thông\\s*tin.{0,60}(?:vụ\\s*việc|khiếu\\s*nại|người\\s*(?:khiếu\\s*nại|bị\\s*phản\\s*ánh))",
+      "description": "HR-020c Điều khoản bảo mật gắn với vụ việc cụ thể",
+      "confidence": 0.75,
+      "context_required": true
+    },
+    {
+      "regex": "(?i)(?:khiếu\\s*nại|phản\\s*ánh).{0,40}quấy\\s*rối.{0,80}mã\\s*nhân\\s*viên\\s*[:=]?\\s*[A-Z]{0,3}\\d{3,8}",
+      "description": "HR-020d Đơn/email khiếu nại cá nhân kèm mã nhân viên",
+      "confidence": 0.85,
+      "context_required": false
+    }
+  ],
+  "keywords": {
+    "primary": ["quấy rối tình dục", "tổ xác minh", "biện pháp bảo vệ tạm thời", "lưu hành nội bộ hạn chế", "đơn khiếu nại"],
+    "secondary": ["kết luận xử lý", "xử lý kỷ luật", "người bị phản ánh", "cố vấn pháp lý", "ban kiểm tra nội bộ"]
+  },
+  "level_gate": {
+    "require_corroboration": true,
+    "fallback_level": "CONFIDENTIAL"
+  },
+  "false_positive_reduction": {
+    "min_context_window": 120,
+    "exclude_if_no_keywords": true
+  }
+}

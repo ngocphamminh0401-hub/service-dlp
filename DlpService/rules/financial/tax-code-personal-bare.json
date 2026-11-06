@@ -1,0 +1,45 @@
+{
+  "id": "tax_code_personal_001",
+  "name": "TaxCodePersonalBare",
+  "category": "financial",
+  "level": "CONFIDENTIAL",
+  "weight": 0.85,
+  "priority": 62,
+  "tags": ["financial", "tax_code", "pii_tax", "personal_id", "financial_personal"],
+  "enabled": true,
+  "llm_policy": "never",
+  "notes": [
+    "FIN/PII - Mã số thuế cá nhân Việt Nam (MST CN), theo NĐ 13/2023/NĐ-CP Điều 2 Khoản 4 và Thông tư 105/2020/TT-BTC. MST cá nhân 13 số (từ 2021) đồng nhất với số định danh cá nhân (CCCD/CMND) -> dữ liệu cá nhân nhạy cảm -> CONFIDENTIAL.",
+    "Dễ nhầm với CCCD 12 số+padding nên BẮT BUỘC context_required=true (keyword MST cá nhân/TNCN gần đó).",
+    "pattern_1 (dãy 13 số trần) cần gate; min_confidence_bypass=0.90 cứu trường hợp dãy 13 số trần đứng gần label MST dù chưa đủ khớp cú pháp ':'/'=' của pattern có label (xem TaxCodePersonalLabeled).",
+    "validators:[mst] (Scanning/Validation/TaxCodeValidator.cs): 13 số = 10 số MST + 3 số phụ thuộc (khác 000), kiểm tra chữ số kiểm tra ở vị trí thứ 10. Là validator CHECKSUM nên chỗ khớp qua được tính là bằng chứng củng cố cho level_gate."
+  ],
+  "patterns": [
+    {
+      "regex": "\\b\\d{13}\\b",
+      "description": "MST cá nhân 13 số (từ 2021, đồng nhất với số định danh)",
+      "confidence": 0.78,
+      "context_required": true,
+      "validators": ["mst"]
+    }
+  ],
+  "keywords": {
+    "primary": ["mã số thuế cá nhân", "MST cá nhân", "mã số cá nhân", "tax identification number", "TIN cá nhân", "TNCN", "thuế thu nhập cá nhân", "personal income tax", "personal tax"],
+    "secondary": ["cục thuế", "quyết toán thuế", "kê khai thuế", "hoàn thuế TNCN", "phiếu lương", "thu nhập chịu thuế", "khấu trừ thuế"]
+  },
+  "level_gate": {
+    "require_corroboration": true,
+    "fallback_level": "INTERNAL",
+    "applies_to_patterns": ["pattern_1"],
+    "min_confidence_bypass": 0.90
+  },
+  "false_positive_reduction": {
+    "min_context_window": 200,
+    "exclude_if_no_keywords": true
+  },
+  "proximity_window": {
+    "max_chars": 60,
+    "same_sentence_required": true,
+    "keyword_scope": "primary"
+  }
+}

@@ -1,0 +1,34 @@
+{
+  "id": "credit_card_001",
+  "name": "CreditCardJCB",
+  "category": "financial",
+  "level": "SECRET",
+  "weight": 0.95,
+  "priority": 100,
+  "tags": ["financial", "credit_card", "payment_card", "pci_dss", "financial_personal"],
+  "enabled": true,
+  "llm_policy": "never",
+  "notes": [
+    "FIN-001 - Số thẻ tín dụng/ghi nợ quốc tế (PCI-DSS v4.0, PAN là dữ liệu cardholder tối mật).",
+    "JCB: bắt đầu bằng 35xx (16 số). Bắt buộc Luhn checksum."
+  ],
+  "patterns": [
+    {
+      "regex": "\\b35(?:2[89]|[3-8]\\d)\\d[-\\s]?\\d{4}[-\\s]?\\d{4}[-\\s]?\\d{4}\\b",
+      "description": "JCB (35xx — 16 số)",
+      "confidence": 0.90,
+      "context_required": false,
+      "validators": ["luhn"]
+    }
+  ],
+  "keywords": {
+    "primary": ["thẻ tín dụng", "credit card", "thẻ ghi nợ", "debit card", "card number", "số thẻ", "PAN"],
+    "secondary": ["Visa", "Mastercard", "Amex", "JCB", "Napas", "CVV", "CVC", "expiry", "ngày hết hạn", "valid thru", "cardholder", "chủ thẻ"]
+  },
+  "false_positive_reduction": {
+    "cvv_expiry_boost": 0.07
+  },
+  "placeholder_exclusion": {
+    "known_test_values": ["4111111111111111", "4012888888881881", "5555555555554444", "378282246310005", "6011111111111117"]
+  }
+}

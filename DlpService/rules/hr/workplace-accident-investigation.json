@@ -1,0 +1,49 @@
+{
+  "id": "hr_workplace_accident_investigation_001",
+  "name": "HR-021 Biên bản điều tra tai nạn lao động kèm dữ liệu y tế nạn nhân",
+  "category": "hr",
+  "level": "RESTRICTED",
+  "weight": 0.88,
+  "priority": 88,
+  "tags": ["hr", "workplace_accident", "health_data", "compensation"],
+  "enabled": true,
+  "notes": [
+    "HR-021 - Biên bản điều tra tai nạn lao động (có dữ liệu y tế + danh tính nạn nhân). Cụm 'tai nạn lao động' xuất hiện phổ biến trong quy trình ATVSLĐ, nội quy, biển cảnh báo nên keyword đơn lẻ dễ gây FP. Điểm khiến biên bản THẬT sự RESTRICTED là tổ hợp: danh tính cụ thể (họ tên + ngày sinh) + chẩn đoán/mức độ thương tật y tế + (thường đi kèm) đề xuất bồi thường — hồ sơ cá nhân, không phải tài liệu quy trình.",
+    "ĐÃ XÓA 'phẫu thuật' khỏi nhánh kết quả chẩn đoán: khớp nhầm bất kỳ ghi chú tái khám sau phẫu thuật thường quy nào — phẫu thuật là hoạt động y tế phổ biến, không đặc thù cho tai nạn lao động (khác 'gãy'/'dập'/'cắt lọc' — mô tả chấn thương cụ thể).",
+    "ĐÃ TÁCH nhánh '%' khỏi 'chẩn đoán': '%' đứng sau nhãn 'chẩn đoán' quá chung (mọi ngưỡng xét nghiệm/chỉ số y khoa đều có dạng này, vd HbA1c >= 6,5% cho đái tháo đường, không liên quan tai nạn lao động) — chỉ giữ '%' cho các nhãn ĐẶC THÙ THƯƠNG TẬT (tỷ lệ thương tật/giám định y khoa/tổn thương chức năng); 'chẩn đoán' chỉ còn khớp cùng từ chấn thương cụ thể.",
+    "ĐÃ XÓA HẲN pattern gốc 'Họ và tên:...Ngày sinh:...': đây chỉ là khối định danh CHUNG (tên+ngày sinh), phổ biến trong MỌI văn bản nhân sự có định danh cá nhân, không đặc trưng riêng cho biên bản TNLĐ. Định danh cá nhân đã có sẵn qua vn_id_001/vn_name_001/dob_001 (rule khác) — không cần lặp lại ở đây.",
+    "Mô tả thương tật trong biên bản thật thường ở dạng VĂN XUÔI tường thuật, không dùng nhãn 'Chẩn đoán:'/'Tỷ lệ thương tật:' — pattern_b có thể ít khớp trên dữ liệu thật hơn kỳ vọng, nhưng pattern_a (tiêu đề) + pattern_d (đề xuất bồi thường/trợ cấp) đã đủ để rule tự corroborate (2 lần khớp cùng rule)."
+  ],
+  "patterns": [
+    {
+      "regex": "(?i)biên\\s*bản\\s*điều\\s*tra\\s*tai\\s*nạn\\s*lao\\s*động",
+      "description": "HR-021a Tiêu đề biên bản điều tra TNLĐ",
+      "confidence": 0.70,
+      "context_required": true
+    },
+    {
+      "regex": "(?i)(?:(?:tỷ\\s*lệ\\s*thương\\s*tật|giám\\s*định\\s*y\\s*khoa|tổn\\s*thương\\s*chức\\s*năng)\\s*[:=]?\\s*.{0,60}(?:\\d{1,3}\\s*%|gãy|dập|cắt\\s*lọc)|chẩn\\s*đoán(?:\\s*ban\\s*đầu)?\\s*[:=]?\\s*.{0,60}(?:gãy|dập|cắt\\s*lọc))",
+      "description": "HR-021b Chẩn đoán/tỷ lệ thương tật cụ thể",
+      "confidence": 0.85,
+      "context_required": false
+    },
+    {
+      "regex": "(?i)(?:đề\\s*xuất\\s*)?(?:trách\\s*nhiệm\\s*)?(?:bồi\\s*thường|trợ\\s*cấp)\\s*(?:tai\\s*nạn\\s*lao\\s*động)",
+      "description": "HR-021d Đề xuất bồi thường/trợ cấp TNLĐ",
+      "confidence": 0.70,
+      "context_required": true
+    }
+  ],
+  "keywords": {
+    "primary": ["biên bản điều tra tai nạn lao động", "người bị nạn", "tỷ lệ thương tật", "giám định y khoa"],
+    "secondary": ["phẫu thuật", "nghỉ điều trị nội trú", "bồi thường", "trợ cấp", "bệnh viện"]
+  },
+  "level_gate": {
+    "require_corroboration": true,
+    "fallback_level": "INTERNAL"
+  },
+  "false_positive_reduction": {
+    "min_context_window": 150,
+    "exclude_if_no_keywords": true
+  }
+}

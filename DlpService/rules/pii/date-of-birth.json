@@ -1,0 +1,63 @@
+{
+  "id": "dob_001",
+  "name": "Ngày tháng năm sinh",
+  "category": "pii",
+  "level": "INTERNAL",
+  "weight": 0.72,
+  "priority": 35,
+  "tags": ["pii", "date_of_birth", "pii_dob", "temporal", "personal_identifier"],
+  "enabled": true,
+  "notes": [
+    "PII - Ngày tháng năm sinh (Date of Birth), theo Nghị định 13/2023/NĐ-CP. FP risk rất cao (mọi ngày tháng đều khớp pattern) — yêu cầu TỐI THIỂU 1 keyword ngữ cảnh. Ngưỡng confidence thấp hơn các rule khác — chủ yếu dùng để kết hợp compound rule.",
+    "pattern_3/4/5 dùng require_keyword_within=40 (buộc keyword PRIMARY 'ngày sinh'/'DOB'/'sinh ngày' phải đứng NGAY GẦN match, không chỉ có mặt đâu đó trong min_context_window=150 rule-wide): pattern_4 (ngày sinh dạng chữ) trước đây context_required=false khiến khớp cả NGÀY BAN HÀNH VĂN BẢN ('...ngày 05 tháng 06 năm 2024 KHUYẾN CÁO...') — mẫu tiêu đề công văn cực kỳ phổ biến; pattern_5 (năm sinh riêng, 1900-2029) là FP cao nhất vì 1 năm 4 chữ số xuất hiện khắp nơi trong hợp đồng/biên bản họp/deadline dự án.",
+    "require_keyword_within đã được engine C# đọc (Bậc 3 #2): keyword PRIMARY phải nằm trong 40 ký tự quanh match (không xét ranh giới câu, không có chế độ bảng); ưu tiên hơn proximity_window cấp rule nếu có.",
+    "level_gate: rule chưa từng có gate trước đây — 1 ngày/năm sinh đứng lẻ trong tin tức PUBLIC (VD tiểu sử 'sinh năm 1990') vẫn tự động INTERNAL — ~490 lần là 'thủ phạm' over-classify PUBLIC trên toàn ruleset."
+  ],
+  "patterns": [
+    {
+      "regex": "\\b(?:0?[1-9]|[12]\\d|3[01])[-/.](?:0?[1-9]|1[0-2])[-/.]\\d{4}\\b",
+      "description": "DD/MM/YYYY hoặc D/M/YYYY (định dạng Việt Nam)",
+      "confidence": 0.65,
+      "context_required": true
+    },
+    {
+      "regex": "\\b\\d{4}[-/.](?:0[1-9]|1[0-2])[-/.](?:0[1-9]|[12]\\d|3[01])\\b",
+      "description": "YYYY-MM-DD (ISO 8601 — dùng trong database, API)",
+      "confidence": 0.70,
+      "context_required": true
+    },
+    {
+      "regex": "\\b(?:0?[1-9]|1[0-2])[-/](?:0?[1-9]|[12]\\d|3[01])[-/]\\d{4}\\b",
+      "description": "MM/DD/YYYY (định dạng Mỹ)",
+      "confidence": 0.60,
+      "context_required": true,
+      "require_keyword_within": 40
+    },
+    {
+      "regex": "\\b(?:0?[1-9]|[12]\\d|3[01])\\s+tháng\\s+(?:0?[1-9]|1[0-2])\\s+năm\\s+(?:19|20)\\d{2}\\b",
+      "description": "Ngày sinh dạng chữ Tiếng Việt (D tháng M năm YYYY)",
+      "confidence": 0.88,
+      "context_required": true,
+      "require_keyword_within": 40
+    },
+    {
+      "regex": "\\b(?:19[0-9]{2}|20[0-2]\\d)\\b",
+      "description": "Năm sinh (1900-2029) — chỉ dùng với keyword ngữ cảnh ngay gần",
+      "confidence": 0.45,
+      "context_required": true,
+      "require_keyword_within": 40
+    }
+  ],
+  "keywords": {
+    "primary": ["ngày sinh", "năm sinh", "DOB", "date of birth", "sinh ngày", "birthdate", "birthday", "ngày tháng năm sinh", "sinh năm", "ngày sinh:", "năm sinh:"],
+    "secondary": ["tuổi", "born", "sinh ra", "khai sinh", "giấy khai sinh", "birth certificate", "ngày sinh nhật", "hồ sơ cá nhân", "hồ sơ nhân sự", "lý lịch", "thông tin cá nhân"]
+  },
+  "false_positive_reduction": {
+    "min_context_window": 150,
+    "exclude_if_no_keywords": true
+  },
+  "level_gate": {
+    "require_corroboration": true,
+    "fallback_level": "PUBLIC"
+  }
+}

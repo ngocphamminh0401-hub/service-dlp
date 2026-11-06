@@ -1,0 +1,68 @@
+{
+  "id": "vn_id_001",
+  "name": "CCCD",
+  "category": "pii",
+  "level": "CONFIDENTIAL",
+  "weight": 0.90,
+  "priority": 80,
+  "tags": ["pii", "identity", "pii_vn_id", "vn_specific", "personal_identifier", "pii_strong"],
+  "enabled": true,
+  "llm_policy": "never",
+  "notes": [
+    "PII-001 - Căn cước công dân (CCCD)/Chứng minh nhân dân (CMND). Nghị định 13/2023/NĐ-CP - danh mục dữ liệu cá nhân nhạy cảm. CCCD 12 số (từ 2012, định danh chính thức); CMND 9 số (trước 2012, vẫn lưu hành đến hết 2024).",
+    "FP risk cao vì 9/12 chữ số xuất hiện phổ biến (mã đơn hàng, số serial...) — yêu cầu TỐI THIỂU 1 keyword ngữ cảnh (context_required=true) để xác nhận.",
+    "pattern_1 (CCCD 12 số) dùng validators:[vn_cccd_prefix] đúng thiết kế gốc — ĐÃ CÀI (Scanning/Validation/CccdValidator.cs): 3 số đầu là 1 trong 63 mã tỉnh, số thứ 4 (giới tính + thế kỷ) 0-3, năm sinh không ở tương lai. Là validator CHECKSUM nên chỗ khớp qua được tính là bằng chứng củng cố cho level_gate. pattern_2 (CMND 9 số cũ) không có quy luật đáng tin nên không gắn validator.",
+    "checkEscalation() quét quanh match, escalate ngay khi thấy 1 keyword — ĐÃ GỠ 'ngày sinh'/'họ và tên'/'địa chỉ'/'tài khoản'/'ngân hàng'/'thẻ tín dụng' khỏi danh sách escalation vì đây là hình dạng bình thường của MỌI form CMND/CCCD/hợp đồng/KYC, không phải bằng chứng bổ sung — giữ là nguyên nhân khiến gần như MỌI file có CCCD (kể cả CONFIDENTIAL bình thường) bị đẩy sai lên SECRET/RESTRICTED. Chỉ giữ 'mật khẩu'/'password' (CCCD cạnh credential là AUTH_SECRET thật) và 'sinh trắc học'/'biometric'/'vân tay'.",
+    "SCALE_LARGE: >50 bản ghi CCCD duy nhất trong 1 file -> escalate SECRET (volume_escalation, đếm riêng theo rule.ID, không gộp liên-rule với hộ chiếu)."
+  ],
+  "patterns": [
+    {
+      "regex": "\\b(\\d{12})\\b",
+      "description": "CCCD 12 chữ số (từ 2012) — word boundary",
+      "confidence": 0.85,
+      "context_required": true,
+      "validators": ["vn_cccd_prefix"]
+    },
+    {
+      "regex": "\\b(\\d{9})\\b",
+      "description": "CMND 9 chữ số (trước 2012)",
+      "confidence": 0.70,
+      "context_required": true
+    },
+    {
+      "regex": "VNM\\d{12}[MF]",
+      "description": "CCCD trong MRZ của thẻ chip (quốc tịch VNM + 12 số + giới tính)",
+      "confidence": 0.97,
+      "context_required": false
+    }
+  ],
+  "keywords": {
+    "primary": ["căn cước", "CMND", "CCCD", "chứng minh nhân dân", "số định danh", "số định danh cá nhân", "giấy tờ tùy thân", "số định danh quốc gia", "căn cước công dân", "chứng minh thư", "số CCCD", "CMND/CCCD", "thẻ căn cước", "VNeID", "định danh điện tử"],
+    "secondary": ["identity", "ID number", "national ID", "cấp ngày", "nơi cấp", "ngày cấp", "có giá trị đến", "quê quán", "hộ khẩu thường trú", "nơi thường trú", "mã định danh", "căn cước gắn chip", "eID"]
+  },
+  "false_positive_reduction": {
+    "min_context_window": 200,
+    "exclude_if_no_keywords": true
+  },
+  "proximity_window": {
+    "max_chars": 60,
+    "same_sentence_required": true,
+    "keyword_scope": "primary"
+  },
+  "escalation": {
+    "keywords": ["mật khẩu", "password", "sinh trắc học", "biometric", "vân tay"],
+    "escalate_to": "SECRET"
+  },
+  "volume_escalation": {
+    "thresholds": [
+      { "min_count": 50, "escalate_to": "SECRET" }
+    ]
+  },
+  "level_gate": {
+    "require_corroboration": true,
+    "fallback_level": "INTERNAL",
+    "applies_to_patterns": ["pattern_1", "pattern_2"],
+    "exempt_patterns": ["pattern_3"],
+    "min_confidence_bypass": 0.90
+  }
+}

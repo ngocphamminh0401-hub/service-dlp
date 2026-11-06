@@ -1,0 +1,113 @@
+== [1/3] Trích bằng extractor hiện tại (tiến trình con) ==
+[cũ] xong 200 file. RAM: nền 39 MB, đỉnh 394 MB
+== [2/3] Trích bằng Apache Tika Server ==
+[Tika] xong. RAM: nền 248 MB, đỉnh 494 MB, khởi động lại server 0 lần
+== [3/3] Chấm điểm (đối chiếu đáp án + quét regex) ==
+## 1. Thời gian trích text / file (ms) — file thường, chỉ tính file trích thành công
+| Định dạng | n | Cũ: trung vị | Cũ: TB | Cũ: p95 | Cũ: max | Tika: trung vị | Tika: TB | Tika: p95 | Tika: max | Tika/Cũ (trung vị) |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| txt | 20 | 1.4 | 1.3 | 2.2 | 2.6 | 9.3 | 10.5 | 18.3 | 26.8 | 6.6x |
+| csv | 20 | 1.8 | 2.2 | 3.5 | 7.0 | 9.6 | 9.8 | 14.2 | 30.8 | 5.3x |
+| docx | 20 | 8.1 | 21.2 | 26.2 | 283.4 | 17.2 | 29.5 | 34.7 | 264.9 | 2.1x |
+| pptx | 20 | 8.3 | 14.6 | 18.5 | 133.8 | 20.0 | 21.4 | 24.8 | 47.1 | 2.4x |
+| xlsx | 20 | 2.5 | 4.5 | 5.5 | 42.1 | 12.8 | 17.5 | 20.3 | 97.3 | 5.2x |
+| xls | 20 | 1.7 | 3.5 | 6.1 | 31.2 | 10.2 | 19.0 | 33.2 | 171.2 | 5.9x |
+| pdf | 20 | 17.3 | 37.9 | 52.1 | 402.4 | 20.4 | 39.7 | 53.0 | 390.6 | 1.2x |
+| eml | 20 | 1.2 | 2.1 | 2.6 | 20.7 | 16.8 | 30.9 | 39.2 | 266.5 | 13.6x |
+
+## 2. File lớn (1 file mỗi định dạng)
+| Định dạng | Kích thước (MB) | Cũ: ms | Cũ: ký tự | Cũ: kết quả | Tika: ms | Tika: ký tự | Tika: kết quả | Marker tìm thấy (cũ / Tika) |
+|---|---:|---:|---:|---|---:|---:|---|---|
+| txt | 8.8 | 70 | 2,000,000 | ok | 170 | 2,000,000 | ok | 6/9 · 6/9 |
+| csv | 8.9 | 125 | 2,000,000 | ok | 322 | 2,000,000 | ok | 3/9 · 3/9 |
+| docx | 0.1 | 786 | 2,000,000 | ok | 175 | 2,000,000 | ok | 6/9 · 6/9 |
+| pptx | 0.1 | 69 | 13,955 | ok | 154 | 14,106 | ok | 9/9 · 9/9 |
+| xlsx | 0.8 | 344 | 2,000,000 | ok | 380 | 2,000,000 | ok | 3/9 · 3/9 |
+| xls | 3.8 | 164 | 2,000,000 | ok | 434 | 2,000,000 | ok | 3/9 · 3/9 |
+| pdf | 0.3 | 657 | 376,965 | ok | 226 | 380,533 | ok | 9/9 · 9/9 |
+| eml | 10.6 | 185 | 2,000,000 | ok | 169 | 2,000,000 | ok | 13/13 · 6/13 |
+
+## 3. RAM đỉnh (MB)
+| | Nền (sau khởi động) | Đỉnh – file thường | Đỉnh – gồm file lớn | Tăng so với nền (đỉnh cuối) |
+|---|---:|---:|---:|---:|
+| Extractor hiện tại (tiến trình .NET) | 39 | 94 | 394 | 356 |
+| Tika Server (tiến trình java) | 248 | 363 | 494 | 245 |
+Tika Server phải khởi động lại 0 lần trong lúc chạy.
+(Ghi chú: nền của tiến trình .NET gồm cả runtime + thư viện đã nạp; đỉnh của tiến trình .NET lấy từ PeakWorkingSet64, đỉnh của Tika lấy mẫu mỗi 100 ms nên có thể thấp hơn đỉnh thật một chút.)
+
+## 4. Chất lượng text — % giá trị đánh dấu tìm thấy trong text trích ra (file thường)
+| Định dạng | Số marker | Cũ | Tika | Cũ: số chỗ khớp regex | Tika: số chỗ khớp regex |
+|---|---:|---:|---:|---:|---:|
+| txt | 180 | 100.0% | 75.0% | 466 | 351 |
+| csv | 220 | 100.0% | 70.0% | 333 | 247 |
+| docx | 420 | 100.0% | 100.0% | 343 | 343 |
+| pptx | 300 | 100.0% | 100.0% | 215 | 215 |
+| xlsx | 300 | 100.0% | 100.0% | 317 | 317 |
+| xls | 300 | 100.0% | 100.0% | 339 | 339 |
+| pdf | 180 | 100.0% | 100.0% | 351 | 351 |
+| eml | 680 | 38.2% | 79.4% | 235 | 413 |
+
+### 4a. Theo vị trí đánh dấu (chỉ in vị trí mà ít nhất một bên < 100%)
+| Định dạng | Vị trí | Marker | Cũ | Tika |
+|---|---|---:|---:|---:|
+| txt | top | 60 | 100.0% | 75.0% |
+| txt | mid | 60 | 100.0% | 75.0% |
+| txt | end | 60 | 100.0% | 75.0% |
+| csv | row-first | 60 | 100.0% | 70.0% |
+| csv | row-mid | 60 | 100.0% | 70.0% |
+| csv | row-last | 60 | 100.0% | 70.0% |
+| csv | quoted-cell | 40 | 100.0% | 70.0% |
+| eml | subject | 60 | 100.0% | 0.0% |
+| eml | from-name | 20 | 100.0% | 0.0% |
+| eml | body-plain | 60 | 100.0% | 0.0% |
+| eml | attach-docx:body | 60 | 0.0% | 100.0% |
+| eml | attach-docx:table | 60 | 0.0% | 100.0% |
+| eml | attach-docx:textbox | 60 | 0.0% | 100.0% |
+| eml | attach-docx:header | 60 | 0.0% | 100.0% |
+| eml | attach-docx:footer | 60 | 0.0% | 100.0% |
+| eml | attach-docx:footnote | 60 | 0.0% | 100.0% |
+| eml | attach-docx:comment | 60 | 0.0% | 100.0% |
+
+### 4b. Theo loại giá trị (mọi file thường)
+| Loại | Marker | Cũ | Tika |
+|---|---:|---:|---:|
+| cccd | 860 | 83.7% | 90.8% |
+| vi | 880 | 84.1% | 88.8% |
+| email | 840 | 83.3% | 91.3% |
+
+### 4c. File đổi đuôi (nội dung thật khác đuôi file)
+| File | Cũ: kết quả | Cũ: marker | Tika: kết quả | Tika: marker |
+|---|---|---:|---|---:|
+| docx_as.txt | ok | 0/21 | ok | 21/21 |
+| pdf_as.docx | fail: Không trích xuất được nội dung (FileFormatException) — file hỏng, có mật khẩu hoặc sai định dạng | 0/9 | ok | 9/9 |
+| xlsx_as.xls | ok | 15/15 | ok | 15/15 |
+| docx_as.pdf | fail: Không trích xuất được nội dung (PdfDocumentFormatException) — file hỏng, có mật khẩu hoặc sai định dạng | 0/21 | ok | 21/21 |
+| txt_as.docx | fail: Không trích xuất được nội dung (FileFormatException) — file hỏng, có mật khẩu hoặc sai định dạng | 0/9 | ok | 9/9 |
+| xls_as.xlsx | ok | 15/15 | ok | 15/15 |
+
+## 5. Tỉ lệ lỗi
+### 5a. File hợp lệ (thường + lớn + đổi đuôi): số file trích THẤT BẠI / tổng
+| Định dạng | Tổng | Cũ: lỗi | Cũ: % | Tika: lỗi | Tika: % |
+|---|---:|---:|---:|---:|---:|
+| txt | 22 | 1 | 4.5% | 0 | 0.0% |
+| csv | 21 | 0 | 0.0% | 0 | 0.0% |
+| docx | 23 | 1 | 4.3% | 0 | 0.0% |
+| pptx | 21 | 0 | 0.0% | 0 | 0.0% |
+| xlsx | 22 | 0 | 0.0% | 0 | 0.0% |
+| xls | 22 | 0 | 0.0% | 0 | 0.0% |
+| pdf | 22 | 1 | 4.5% | 0 | 0.0% |
+| eml | 21 | 0 | 0.0% | 0 | 0.0% |
+| **Tổng** | 174 | 3 | 1.7% | 0 | 0.0% |
+
+### 5b. File lỗi cố ý (cắt cụt / rác / rỗng): cách mỗi bên xử lý
+| Loại | Số file | Cũ: từ chối êm | Cũ: trả text | Cũ: treo/sập | Tika: từ chối êm | Tika: trả text | Tika: treo/sập |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| corrupt | 10 | 10 | 0 | 0 | 8 | 2 | 0 |
+| garbage | 8 | 5 | 3 | 0 | 0 | 8 | 0 |
+| empty | 8 | 5 | 3 | 0 | 8 | 0 | 0 |
+
+### 5c. Thông báo lỗi thường gặp (file hợp lệ + file lỗi)
+- **Cũ**: docx/corrupt: Không trích xuất được nội dung (InvalidDataException) — file hỏng, có mật khẩu hoặc sai định dạng ×2; pptx/corrupt: Không trích xuất được nội dung (InvalidDataException) — file hỏng, có mật khẩu hoặc sai định dạng ×2; xlsx/corrupt: Không trích xuất được nội dung (InvalidDataException) — file hỏng, có mật khẩu hoặc sai định dạng ×2; xls/corrupt: Không trích xuất được nội dung (CompoundDocumentException) — file hỏng, có mật khẩu hoặc sai định dạng ×2; pdf/corrupt: Không trích xuất được nội dung (PdfDocumentFormatException) — file hỏng, có mật khẩu hoặc sai định dạng ×2; docx/garbage: Không trích xuất được nội dung (FileFormatException) — file hỏng, có mật khẩu hoặc sai định dạng ×1; docx/empty: Không trích xuất được nội dung (FileFormatException) — file hỏng, có mật khẩu hoặc sai định dạng ×1; pptx/garbage: Không trích xuất được nội dung (FileFormatException) — file hỏng, có mật khẩu hoặc sai định dạng ×1; pptx/empty: Không trích xuất được nội dung (FileFormatException) — file hỏng, có mật khẩu hoặc sai định dạng ×1; xlsx/garbage: Không trích xuất được nội dung (HeaderException) — file hỏng, có mật khẩu hoặc sai định dạng ×1; xlsx/empty: Không trích xuất được nội dung (HeaderException) — file hỏng, có mật khẩu hoặc sai định dạng ×1; xls/garbage: Không trích xuất được nội dung (HeaderException) — file hỏng, có mật khẩu hoặc sai định dạng ×1
+- **Tika**: docx/corrupt: HTTP 422 ×2; xls/corrupt: HTTP 422 ×2; pdf/corrupt: HTTP 422 ×2; txt/empty: HTTP 422 ×1; csv/empty: HTTP 422 ×1; docx/empty: HTTP 422 ×1; pptx/corrupt: HTTP 422 ×1; pptx/empty: HTTP 422 ×1; xlsx/corrupt: HTTP 422 ×1; xlsx/empty: HTTP 422 ×1; xls/empty: HTTP 422 ×1; pdf/empty: HTTP 422 ×1
+
+Báo cáo số liệu: D:\Service-DLP\tools\tika-bench\results\summary.md

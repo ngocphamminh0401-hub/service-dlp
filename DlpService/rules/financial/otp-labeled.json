@@ -1,0 +1,48 @@
+{
+  "id": "otp_auth_001",
+  "name": "OtpLabeled",
+  "category": "financial",
+  "level": "SECRET",
+  "weight": 0.95,
+  "priority": 96,
+  "tags": ["financial", "auth_secret", "otp", "pin", "security_critical"],
+  "enabled": true,
+  "notes": [
+    "FIN-009 - Mã OTP/PIN giao dịch/mã xác thực giao dịch (AUTH_SECRET). Theo tài liệu 'Bộ rule kết hợp Regex để phân loại mức độ nhạy cảm' Phần 3 Bước 1: AUTH_SECRET luôn RESTRICTED/SECRET bất kể ngữ cảnh (GDPR Điều 32) — 1 mã OTP/PIN thật rò rỉ 1 lần đã đủ để chiếm đoạt tài khoản, không cần lặp lại hay có PII đi kèm mới coi là nghiêm trọng.",
+    "Dùng [^\\\\d]{0,30} (không loại trừ \\\\n) giữa label và giá trị: ngữ cảnh SMS/email thật luôn chêm 'của bạn/quý khách là' giữa label và số; file docx dạng bảng key-value tách label/giá trị bằng đúng 1 dấu xuống dòng nên không được loại trừ \\\\n.",
+    "3 pattern con (mã OTP, mã PIN giao dịch, mã xác thực giao dịch) gộp trong 1 file vì cùng nhóm 'label + chuỗi số ngay sau', tách riêng khỏi pattern OTP đứng một mình (xem OtpStandalone) và pattern giá trị sau 'là:' (xem OtpValueAfterLabel) vì 2 pattern đó cần context_required=true để giảm FP."
+  ],
+  "patterns": [
+    {
+      "regex": "(?i)(?:mã\\s*OTP|OTP\\s*code|one[\\s\\-]?time\\s*password)[^\\d]{0,30}\\d{4,8}\\b",
+      "description": "FIN-009a Mã OTP + chuỗi số",
+      "confidence": 0.96,
+      "context_required": false
+    },
+    {
+      "regex": "(?i)mã\\s*PIN(?:\\s*giao\\s*dịch)?[^\\d]{0,30}\\d{4,8}\\b",
+      "description": "FIN-009b Mã PIN (giao dịch) + chuỗi số",
+      "confidence": 0.95,
+      "context_required": false
+    },
+    {
+      "regex": "(?i)mã\\s*xác\\s*thực(?:\\s*giao\\s*dịch)?[^\\d]{0,30}\\d{4,8}\\b",
+      "description": "FIN-009c Mã xác thực giao dịch + chuỗi số",
+      "confidence": 0.95,
+      "context_required": false
+    }
+  ],
+  "keywords": {
+    "primary": ["mã OTP", "OTP code", "mã PIN giao dịch", "mã xác thực giao dịch", "one-time password"],
+    "secondary": ["OTP", "PIN", "xác thực giao dịch", "xác thực 2 yếu tố", "2FA", "mã bảo mật giao dịch"]
+  },
+  "false_positive_reduction": {
+    "min_context_window": 60,
+    "exclude_if_no_keywords": false
+  },
+  "placeholder_exclusion": {
+    "value_blocklist_patterns": ["^(0000|1234|123456|111111|000000|999999)$"],
+    "doc_context_discount_keywords": ["hướng dẫn", "ví dụ", "cách sử dụng", "training", "tutorial", "demo"],
+    "doc_context_discount_factor": 0.4
+  }
+}

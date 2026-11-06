@@ -1,0 +1,26 @@
+<!-- [Thay đổi] File mới: công cụ đo baseline (precision/recall regex-only + thời gian trích/quét/phân loại).
+     Tham chiếu thẳng DlpService để chạy ĐÚNG pipeline của service, không chép lại logic. -->
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>DlpBaseline</RootNamespace>
+  </PropertyGroup>
+
+  <!-- Thư mục rules/ của DlpService (CopyToOutputDirectory) được copy theo sang thư mục chạy của tool này —
+       CompoundRuleModule luôn đọc <thư mục chạy>/rules/compound.json -->
+  <ItemGroup>
+    <ProjectReference Include="..\..\..\DlpService\DlpService.csproj" />
+  </ItemGroup>
+
+  <!-- [Thay đổi] Đo lại với Tika native: tham số extractor (legacy hoặc tika) dùng chung giữa các công cụ đo -->
+  <ItemGroup>
+    <Compile Include="..\..\shared\ExtractorSwitch.cs" Link="ExtractorSwitch.cs" />
+    <!-- [Thay đổi] buổi 15: tắt hạ xung EcoQoS khi chạy nền -->
+    <Compile Include="..\..\shared\PowerThrottling.cs" Link="PowerThrottling.cs" />
+  </ItemGroup>
+
+</Project>

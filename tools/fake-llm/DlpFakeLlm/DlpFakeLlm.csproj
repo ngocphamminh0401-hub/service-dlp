@@ -1,0 +1,22 @@
+<!-- [Thay đổi] File mới (mục 5 - LLM giả cho test): dựng THẬT gRPC qua Named Pipe theo đúng contracts/inference.proto,
+     để test round-trip hợp đồng IPC trước khi có Worker LLM thật (mục 4.12) và model ONNX thật (mục 6). -->
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>DlpFakeLlm</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Grpc.AspNetCore" Version="2.66.0" />
+    <PackageReference Include="Grpc.Net.Client" Version="2.66.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Sinh cả code Server (fake LLM) và Client (smoke test) từ CÙNG 1 file .proto đã chốt -->
+    <Protobuf Include="..\..\..\contracts\inference.proto" GrpcServices="Both" ProtoRoot="..\..\..\contracts" />
+  </ItemGroup>
+
+</Project>

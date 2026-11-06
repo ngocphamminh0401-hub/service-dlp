@@ -1,0 +1,18 @@
+<!-- [Thay đổi] File mới (mở rộng định dạng - Bước 13): công cụ test bằng file độc hại mẫu — tự tạo zip bomb, file
+     lồng cấu trúc quá sâu, file quá khổ, rồi chạy qua FileReaderService thật để xác nhận các giới hạn cứng ở
+     Bước 11 (timeout, độ sâu) và Bước 12 (chặn zip bomb) hoạt động đúng: không treo, không crash, báo lỗi rõ ràng. -->
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>DlpExtractorSafety</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\..\DlpService\DlpService.csproj" />
+  </ItemGroup>
+
+</Project>

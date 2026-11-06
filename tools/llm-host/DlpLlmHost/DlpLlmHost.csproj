@@ -1,0 +1,27 @@
+<!-- [Thay đổi] File mới (mục 6.2/6.3 - Model và runtime, Vòng đời): service LLM THẬT — nạp model Phi-4-mini-instruct
+     ONNX INT4 bằng ONNX Runtime GenAI, kiểm tra SHA-256 so với manifest.json khi khởi động (mục 8 - "Model bị
+     thay"), nạp lười + tự giải phóng RAM khi rảnh + warm-up (mục 6.3), trả lời GetInfo thật qua gRPC/Named Pipe
+     (cùng contracts/inference.proto với tools/fake-llm/DlpFakeLlm). Classify CHƯA sinh câu trả lời thật (mục 6.4/6.5
+     là việc khác, làm sau) — chỉ xác nhận nạp model được rồi trả NOT_READY. -->
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>DlpLlmHost</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.ML.OnnxRuntimeGenAI" Version="0.9.2" />
+    <PackageReference Include="Grpc.AspNetCore" Version="2.66.0" />
+    <!-- [Thay đổi] mục 14 "Đăng ký dịch vụ": để chạy đúng dưới SCM (Service Control Manager) — nhận start/stop
+         event, không cần console, ghi Event Log khi chạy như service thay vì console app bình thường. -->
+    <PackageReference Include="Microsoft.Extensions.Hosting.WindowsServices" Version="10.0.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Protobuf Include="..\..\..\contracts\inference.proto" GrpcServices="Server" ProtoRoot="..\..\..\contracts" />
+  </ItemGroup>
+
+</Project>

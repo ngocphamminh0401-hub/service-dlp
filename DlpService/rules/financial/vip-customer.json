@@ -1,0 +1,41 @@
+{
+  "id": "vip_customer_001",
+  "name": "FIN-011 Danh sách khách hàng VIP/ưu tiên",
+  "category": "financial",
+  "level": "SECRET",
+  "weight": 0.90,
+  "priority": 90,
+  "tags": ["financial", "vip_customer", "high_net_worth"],
+  "enabled": true,
+  "notes": [
+    "FIN-011 - Danh sách khách hàng VIP/ưu tiên (luôn RESTRICTED/SECRET bất kể quy mô). Dataset đánh giá cho thấy danh sách khách hàng VIP (kèm phân hạng: Kim cương/Bạch kim/VIP1/VIP2...) bị coi SECRET ngay cả khi CHỈ có 10-15 khách hàng — thấp hơn nhiều so với ngưỡng SCALE_LARGE >50 chung.",
+    "Không dùng volume_escalation (đếm số lần) vì rủi ro nằm ở NGỮ CẢNH 'đây là danh sách khách VIP', không phải số lượng bản ghi.",
+    "Cần corroboration: tránh 1 lần nhắc 'khách hàng VIP' trong email marketing chung tự động thành SECRET — danh sách VIP thật luôn đi kèm dữ liệu tài chính/PII cụ thể (bank_account, tên...) đạt CONFIDENTIAL+ trong cùng chunk mới đủ corroboration."
+  ],
+  "patterns": [
+    {
+      "regex": "(?i)danh\\s*sách\\s*khách\\s*hàng\\s*(?:VIP|ưu\\s*tiên)",
+      "description": "FIN-011a Tiêu đề danh sách khách hàng VIP/ưu tiên",
+      "confidence": 0.90,
+      "context_required": false
+    },
+    {
+      "regex": "(?i)(?:hạng\\s*khách\\s*hàng|phân\\s*hạng)\\s*[:=]?\\s*(?:VIP\\d?|kim\\s*cương|bạch\\s*kim)",
+      "description": "FIN-011b Phân hạng khách hàng VIP (Kim cương/Bạch kim/VIP1/VIP2)",
+      "confidence": 0.85,
+      "context_required": false
+    }
+  ],
+  "keywords": {
+    "primary": ["khách hàng VIP", "khách hàng ưu tiên", "danh sách khách hàng VIP", "phòng khách hàng ưu tiên"],
+    "secondary": ["Kim cương", "Bạch kim", "VIP1", "VIP2", "AUM", "tổng tài sản quản lý", "hạng khách hàng"]
+  },
+  "level_gate": {
+    "require_corroboration": true,
+    "fallback_level": "CONFIDENTIAL"
+  },
+  "false_positive_reduction": {
+    "min_context_window": 100,
+    "exclude_if_no_keywords": false
+  }
+}

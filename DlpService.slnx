@@ -1,0 +1,10 @@
+<Solution>
+  <Folder Name="/tools/" />
+  <Folder Name="/tools/resilience/">
+    <Project Path="tools/resilience/DlpResilience/DlpResilience.csproj" />
+  </Folder>
+  <Project Path="DlpService/DlpService.csproj" />
+  <Project Path="tools/eval/DlpBaseline/DlpBaseline.csproj" />
+  <Project Path="tools/resilience/DlpResilience/DlpResilience.csproj" />
+  <Project Path="tools/tika-bench/DlpTikaBench/DlpTikaBench.csproj" />
+</Solution>

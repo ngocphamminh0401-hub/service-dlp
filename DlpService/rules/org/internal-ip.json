@@ -1,0 +1,46 @@
+{
+  "id": "internal_ip_001",
+  "name": "ORG-004 Địa chỉ IP nội bộ (Private)",
+  "category": "org",
+  "level": "INTERNAL",
+  "weight": 0.75,
+  "priority": 50,
+  "tags": ["org", "internal_ip", "network", "infrastructure", "rfc1918"],
+  "enabled": true,
+  "notes": [
+    "ORG-004 - Địa chỉ IP nội bộ (RFC 1918 private address space): 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16. Sự rò rỉ IP nội bộ giúp attacker lập bản đồ mạng nội bộ (network reconnaissance). Không phải mọi IP nội bộ đều nhạy cảm — context quyết định cấp độ: IP + username/password -> SECRET (qua escalation); IP đơn lẻ -> INTERNAL.",
+    "IP nội bộ (192.168.x.x, 10.x.x.x...) là ví dụ minh họa cực phổ biến trong tài liệu hướng dẫn kỹ thuật công khai, giáo trình mạng máy tính, blog kỹ thuật — không phải lúc nào cũng phản ánh hạ tầng thật của tổ chức. negation_filter hạ về PUBLIC khi có ngữ cảnh 'ví dụ/minh họa' gần IP.",
+    "min_confidence_bypass=0.90: phòng regression tương tự watermark_001 — 1 IP thật kèm ngữ cảnh mạnh (VD 'Server database production: 10.20.30.40, firewall...') vẫn là match đơn lẻ, không lặp lại, không có rule khác hỗ trợ -> nếu không có bypass sẽ bị hạ PUBLIC sai dù rõ ràng là hạ tầng thật.",
+    "escalation (IP + password/credentials/admin/root/ssh... -> escalate CONFIDENTIAL) đã được engine C# đọc (Bậc 3 #1): từ khoá escalation vừa nâng mức vừa là bằng chứng củng cố cho level_gate, nhưng negation_filter (ví dụ/demo...) vẫn thắng — 'Ví dụ: ssh root@192.168.1.10' vẫn hạ PUBLIC. min_confidence_bypass cũng đã được đọc (Bậc 3 #3): độ tin cậy động = 0.88 × 0.75 + boost từ khoá (primary +0.15, secondary +0.05, tối đa 0.30) — cần ≥2 từ khoá primary (VD 'server' + 'firewall') mới đạt 0.90."
+  ],
+  "patterns": [
+    {
+      "regex": "\\b(?:10\\.(?:25[0-5]|2[0-4]\\d|1\\d{2}|[1-9]\\d|\\d)\\.(?:25[0-5]|2[0-4]\\d|1\\d{2}|[1-9]\\d|\\d)\\.(?:25[0-5]|2[0-4]\\d|1\\d{2}|[1-9]\\d|\\d)|172\\.(?:1[6-9]|2\\d|3[01])\\.(?:25[0-5]|2[0-4]\\d|1\\d{2}|[1-9]\\d|\\d)\\.(?:25[0-5]|2[0-4]\\d|1\\d{2}|[1-9]\\d|\\d)|192\\.168\\.(?:25[0-5]|2[0-4]\\d|1\\d{2}|[1-9]\\d|\\d)\\.(?:25[0-5]|2[0-4]\\d|1\\d{2}|[1-9]\\d|\\d))\\b",
+      "description": "ORG-004 theo spec PDF",
+      "confidence": 0.88,
+      "context_required": false
+    }
+  ],
+  "keywords": {
+    "primary": ["địa chỉ IP", "IP address", "gateway", "subnet", "server", "firewall", "router"],
+    "secondary": ["mạng nội bộ", "internal network", "LAN", "WAN", "VPN", "DNS", "DHCP", "host", "endpoint", "network diagram", "sơ đồ mạng", "topology", "database", "server IP"]
+  },
+  "false_positive_reduction": {
+    "min_context_window": 100,
+    "exclude_if_no_keywords": false
+  },
+  "escalation": {
+    "keywords": ["password", "passwd", "mật khẩu", "credentials", "username", "login", "admin", "root", "ssh", "rdp", "telnet"],
+    "escalate_to": "CONFIDENTIAL"
+  },
+  "level_gate": {
+    "require_corroboration": true,
+    "fallback_level": "PUBLIC",
+    "min_confidence_bypass": 0.90
+  },
+  "negation_filter": {
+    "window_chars": 60,
+    "trigger_words": ["ví dụ", "example", "vd:", "sample", "demo", "hướng dẫn cấu hình mẫu"],
+    "action": "downgrade_to_gate"
+  }
+}

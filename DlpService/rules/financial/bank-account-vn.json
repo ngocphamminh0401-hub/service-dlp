@@ -1,0 +1,68 @@
+{
+  "id": "bank_account_001",
+  "name": "BankAccountVN",
+  "category": "financial",
+  "level": "CONFIDENTIAL",
+  "weight": 0.88,
+  "priority": 70,
+  "tags": ["financial", "bank_account", "account_number", "financial_personal"],
+  "enabled": true,
+  "notes": [
+    "FIN-002 - Số tài khoản ngân hàng Việt Nam. Theo quy định NHNN: 9-14 chữ số (Vietcombank 13, Vietinbank/BIDV 14, Agribank 13, Techcombank 9/12-13, MB 12, VPBank 10-13); một số NH đã chuyển 12-15 số theo ISO 13616.",
+    "FP risk rất cao (bất kỳ dãy 9-14 số nào đều khớp pattern) nên toàn bộ 4 pattern đều context_required=true, bắt buộc có keyword ngân hàng/STK/tài khoản gần đó.",
+    "Rule generic nhất nhóm financial: proximity_window siết chặt nhất (max_chars=50, cùng mức social_insurance), không có exempt_patterns nào miễn gate.",
+    "Đã gỡ block escalation cũ (từng nâng SECRET khi thấy sao kê/số dư/statement/balance gần số TK) vì đó là từ vựng ngân hàng thông thường, không phải bằng chứng escalation - tự mâu thuẫn với ví dụ mẫu CONFIDENTIAL trong tài liệu gốc.",
+    "SCALE_LARGE: >50 số TK duy nhất trong 1 file -> escalate SECRET (volume_escalation).",
+    "min_confidence_bypass=0.90 cứu đúng trường hợp có bằng chứng ngữ cảnh rất mạnh (vd 440037110392 conf=0.92 với label 'số tài khoản' rõ ràng) khỏi bị gate hạ sai xuống INTERNAL chỉ vì xuất hiện 1 lần."
+  ],
+  "patterns": [
+    {
+      "regex": "\\b(\\d{9,14})\\b",
+      "description": "Số tài khoản NH VN 9-14 chữ số (context_required bắt buộc)",
+      "confidence": 0.70,
+      "context_required": true
+    },
+    {
+      "regex": "\\b(\\d{15,16})\\b",
+      "description": "Số tài khoản NH dài 15-16 số (chuẩn quốc tế hóa)",
+      "confidence": 0.85,
+      "context_required": true
+    },
+    {
+      "regex": "\\b\\d{4}[-\\s]\\d{4}[-\\s]\\d{4,6}\\b",
+      "description": "Số tài khoản định dạng nhóm (4-4-4/6)",
+      "confidence": 0.75,
+      "context_required": true
+    },
+    {
+      "regex": "\\b(?:0400|0600|7901|9704|9999|1970|2002|4200)\\d{6,10}\\b",
+      "description": "Số TK có BIN/prefix ngân hàng VN đặc trưng",
+      "confidence": 0.80,
+      "context_required": true
+    }
+  ],
+  "keywords": {
+    "primary": ["tài khoản", "số TK", "STK", "số tài khoản", "account number", "account_number", "account_no", "acct_no", "so_tai_khoan", "bank account", "chuyển khoản", "tài khoản ngân hàng"],
+    "secondary": ["ngân hàng", "Vietcombank", "BIDV", "Agribank", "VPBank", "Techcombank", "MB Bank", "ACB", "TPBank", "Vietinbank", "SHB", "OCB", "MSB", "SeABank", "HDBank", "LienVietPostBank", "ABBANK", "VIB", "Sacombank", "Eximbank", "Nam A Bank", "Bac A Bank", "Kienlongbank", "PGBank", "mã CIF", "CIF", "tài khoản thanh toán", "tài khoản tiết kiệm", "CTK", "chủ tài khoản", "beneficiary", "người thụ hưởng", "routing", "swift", "nộp tiền", "rút tiền", "số dư"]
+  },
+  "level_gate": {
+    "require_corroboration": true,
+    "fallback_level": "INTERNAL",
+    "applies_to_patterns": ["pattern_1", "pattern_2", "pattern_3", "pattern_4"],
+    "min_confidence_bypass": 0.90
+  },
+  "false_positive_reduction": {
+    "min_context_window": 150,
+    "exclude_if_no_keywords": true
+  },
+  "proximity_window": {
+    "max_chars": 50,
+    "same_sentence_required": true,
+    "keyword_scope": "primary"
+  },
+  "volume_escalation": {
+    "thresholds": [
+      { "min_count": 50, "escalate_to": "SECRET" }
+    ]
+  }
+}

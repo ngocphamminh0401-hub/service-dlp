@@ -1,0 +1,35 @@
+{
+  "id": "credit_card_001",
+  "name": "CreditCardVisa",
+  "category": "financial",
+  "level": "SECRET",
+  "weight": 0.95,
+  "priority": 100,
+  "tags": ["financial", "credit_card", "payment_card", "pci_dss", "financial_personal"],
+  "enabled": true,
+  "llm_policy": "never",
+  "notes": [
+    "FIN-001 - Số thẻ tín dụng/ghi nợ quốc tế. PCI-DSS v4.0 - Primary Account Number (PAN) là dữ liệu cardholder tối mật.",
+    "Visa: 4xxx xxxx xxxx xxxx (16 số, bắt đầu bằng 4). Bắt buộc Luhn checksum validation (loại bỏ ~90% false positive), không cần keyword context vì pattern đủ đặc trưng khi qua Luhn.",
+    "known_test_values (living list, cần rà soát định kỳ theo từng cổng thanh toán): 4111111111111111, 4012888888881881 - không loại được bằng Luhn vì các số này hợp lệ Luhn."
+  ],
+  "patterns": [
+    {
+      "regex": "\\b4\\d{3}[-\\s]?\\d{4}[-\\s]?\\d{4}[-\\s]?\\d{4}\\b",
+      "description": "Visa (bắt đầu bằng 4, 16 số)",
+      "confidence": 0.95,
+      "context_required": false,
+      "validators": ["luhn"]
+    }
+  ],
+  "keywords": {
+    "primary": ["thẻ tín dụng", "credit card", "thẻ ghi nợ", "debit card", "card number", "số thẻ", "PAN"],
+    "secondary": ["Visa", "Mastercard", "Amex", "JCB", "Napas", "CVV", "CVC", "expiry", "ngày hết hạn", "valid thru", "cardholder", "chủ thẻ"]
+  },
+  "false_positive_reduction": {
+    "cvv_expiry_boost": 0.07
+  },
+  "placeholder_exclusion": {
+    "known_test_values": ["4111111111111111", "4012888888881881", "5555555555554444", "378282246310005", "6011111111111117"]
+  }
+}

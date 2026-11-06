@@ -1,0 +1,76 @@
+{
+  "id": "watermark_001",
+  "name": "Watermark nội bộ / nhãn lưu hành hạn chế",
+  "category": "org",
+  "level": "INTERNAL",
+  "weight": 0.80,
+  "priority": 45,
+  "tags": ["org", "watermark", "internal_label", "distribution_control"],
+  "enabled": true,
+  "notes": [
+    "ORG-006 (Watermark) - Watermark nội bộ/Nhãn lưu hành hạn chế. Phát hiện nhãn watermark văn bản chỉ ra tài liệu chỉ dùng nội bộ, thường ở header/footer văn bản, background watermark PDF, tiêu đề slide, ghi chú email. Strategy: pattern match toàn cụm từ (multi-word), không match từng từ riêng lẻ ('nội bộ' đơn lẻ quá chung chung).",
+    "pattern_a2 ('lưu hành nội bộ' KHÔNG bắt buộc có 'chỉ' đứng trước) bổ sung vì văn bản hay ghi '(Lưu hành nội bộ - Chưa công bố)' ngay dưới tiêu đề mà không có 'chỉ' — trước đây bị bỏ sót hoàn toàn.",
+    "pattern_e (không/nghiêm cấm phổ biến/phát hành/chia sẻ/công bố ra ngoài) mở rộng chấp nhận cả 'nghiêm cấm' làm từ phủ định thay thế cho 'không', và 'bên ngoài' ngoài 'ngoài' trơn.",
+    "ĐÃ XÓA pattern 'INTERNAL' standalone (context_required=true): đóng góp recall thấp (7 pattern còn lại đã đủ đặc trưng để bắt watermark thật) nhưng là nguồn FP cao nhất — khớp 'internal server', 'internal audit', 'internal API' trong tài liệu kỹ thuật không liên quan phân loại watermark.",
+    "min_confidence_bypass=0.90: watermark là nhãn xuất hiện ĐÚNG 1 LẦN theo thiết kế (header/footer) — bắt lặp lại >=2 lần hay đòi rule khác hỗ trợ gần như luôn thất bại với văn bản ngắn chỉ có watermark làm tín hiệu duy nhất, dù đó vẫn là tài liệu nội bộ thật. Không có bypass từng gây regression -58 file trên domain healthcare (INTERNAL accuracy 79.0%->75.4%).",
+    "min_confidence_bypass đã được engine C# đọc (Bậc 3 #3): độ tin cậy động = confidence × weight + boost từ khoá (primary +0.15, secondary +0.05, tối đa 0.30) trong vùng min_context_window; đạt ngưỡng thì tính là đủ củng cố cho level_gate. negation_filter vẫn thắng."
+  ],
+  "patterns": [
+    {
+      "regex": "(?i)(?:chỉ\\s*lưu\\s*hành\\s*nội\\s*bộ|internal\\s*use\\s*only|do\\s*not\\s*distribute|for\\s*internal\\s*use\\s*only)",
+      "description": "ORG-006a nhãn lưu hành nội bộ đầy đủ",
+      "confidence": 0.93,
+      "context_required": false
+    },
+    {
+      "regex": "(?i)lưu\\s*hành\\s*nội\\s*bộ",
+      "description": "ORG-006a2 lưu hành nội bộ (không bắt buộc có 'chỉ')",
+      "confidence": 0.90,
+      "context_required": false
+    },
+    {
+      "regex": "(?i)chưa\\s*công\\s*bố",
+      "description": "ORG-006g chưa công bố",
+      "confidence": 0.75,
+      "context_required": true
+    },
+    {
+      "regex": "(?i)(?:phân\\s*loại|classification|label)\\s*[:=—\\-]\\s*(?:INTERNAL|NỘI\\s*BỘ)\\b",
+      "description": "ORG-006b INTERNAL/NỘI BỘ sau nhãn phân loại",
+      "confidence": 0.95,
+      "context_required": false
+    },
+    {
+      "regex": "(?i)NỘI\\s*BỘ\\s*[-—–]\\s*(?:Không\\s*phổ\\s*biến|hạn\\s*chế\\s*phổ\\s*biến|hạn\\s*chế\\s*lưu\\s*hành|hạn\\s*chế\\s*phát\\s*hành)",
+      "description": "ORG-006c NỘI BỘ + hạn chế phổ biến",
+      "confidence": 0.92,
+      "context_required": false
+    },
+    {
+      "regex": "(?i)INTERNAL\\s*[-—–]\\s*(?:Hạn\\s*chế|Không\\s*phổ\\s*biến|restricted|limited)",
+      "description": "ORG-006d INTERNAL + hạn chế",
+      "confidence": 0.92,
+      "context_required": false
+    },
+    {
+      "regex": "(?i)(?:không|nghiêm\\s*cấm)\\s*(?:phổ\\s*biến|phát\\s*hành|chia\\s*sẻ|công\\s*bố)\\s*ra\\s*(?:ngoài|bên\\s*ngoài)",
+      "description": "ORG-006e không/nghiêm cấm phổ biến/phát hành/chia sẻ/công bố ra ngoài",
+      "confidence": 0.88,
+      "context_required": false
+    }
+  ],
+  "keywords": {
+    "primary": ["nội bộ", "internal", "lưu hành nội bộ", "internal use only", "chỉ lưu hành nội bộ", "không phổ biến", "không phổ biến ra ngoài", "không chia sẻ ra bên ngoài", "do not distribute", "hạn chế phổ biến", "hạn chế lưu hành", "chưa công bố"],
+    "secondary": ["bảo mật", "hạn chế", "phát hành", "circulation", "VNPT", "tài liệu", "phân loại"]
+  },
+  "negation_filter": {
+    "window_chars": 40,
+    "trigger_words": ["không phải tài liệu nội bộ", "đã công bố", "đã được phê duyệt công khai", "không thuộc diện hạn chế"],
+    "action": "downgrade_to_gate"
+  },
+  "level_gate": {
+    "require_corroboration": true,
+    "fallback_level": "PUBLIC",
+    "min_confidence_bypass": 0.90
+  }
+}

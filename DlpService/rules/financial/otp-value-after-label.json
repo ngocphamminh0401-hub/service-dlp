@@ -1,0 +1,35 @@
+{
+  "id": "otp_auth_001",
+  "name": "OtpValueAfterLabel",
+  "category": "financial",
+  "level": "SECRET",
+  "weight": 0.95,
+  "priority": 96,
+  "tags": ["financial", "auth_secret", "otp", "pin", "security_critical"],
+  "enabled": true,
+  "notes": [
+    "FIN-009e - Giá trị OTP/PIN đứng sau nhãn 'là:' (có thể bị che một phần bằng '*'). Mẫu email/SMS thật thường viết dài dòng nên số tiền/số TK có thể chen giữa label và mã thật, làm 3 pattern có label không với tới. Ranh giới cuối dùng (?:[^\\\\d]|$) thay vì \\\\b vì PDF text layer hay chèn ký tự rác cuối dòng không phải khoảng trắng/dấu câu.",
+    "context_required=true: chỉ tính khi rule đã có keyword OTP/PIN/xác thực xuất hiện đâu đó trong cùng chunk (không phải mọi 'là: <số>' trong file)."
+  ],
+  "patterns": [
+    {
+      "regex": "(?i)\\blà\\s*[:：]\\s*[\\d\\*]{4,8}(?:[^\\d]|$)",
+      "description": "FIN-009e Giá trị OTP/PIN sau nhãn 'là:' (có thể bị che 1 phần)",
+      "confidence": 0.85,
+      "context_required": true
+    }
+  ],
+  "keywords": {
+    "primary": ["mã OTP", "OTP code", "mã PIN giao dịch", "mã xác thực giao dịch", "one-time password"],
+    "secondary": ["OTP", "PIN", "xác thực giao dịch", "xác thực 2 yếu tố", "2FA", "mã bảo mật giao dịch"]
+  },
+  "false_positive_reduction": {
+    "min_context_window": 60,
+    "exclude_if_no_keywords": false
+  },
+  "placeholder_exclusion": {
+    "value_blocklist_patterns": ["^(0000|1234|123456|111111|000000|999999)$"],
+    "doc_context_discount_keywords": ["hướng dẫn", "ví dụ", "cách sử dụng", "training", "tutorial", "demo"],
+    "doc_context_discount_factor": 0.4
+  }
+}
