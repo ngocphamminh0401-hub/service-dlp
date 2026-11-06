@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk.Worker">
+
+  <!-- [Thay đổi] File mới (GĐ2 bước 2.1, docs/ke-hoach-trien-khai-linux.md mục 5.3): HOST LINUX mỏng. Chỉ tham chiếu Core (KHÔNG tham chiếu
+       DlpService — đó là host Windows, kéo theo gRPC/LLM/PerformanceCounter). Không có LLM trên Linux (mục 4.2). -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <!-- Tên file chạy: dlp-service (theo bố cục /opt/dlp-service ở mục 5.4) thay vì DlpService.Host.Linux -->
+    <AssemblyName>dlp-service</AssemblyName>
+    <RootNamespace>DlpService.Host.Linux</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\DlpService.Core\DlpService.Core.csproj" />
+  </ItemGroup>
+
+  <!-- systemd: báo trạng thái "đã sẵn sàng"/"đang dừng" cho systemd (Type=notify) và ghi log theo định dạng journald.
+       Chạy tay bằng "dotnet run" thì không có tác dụng gì (giống AddWindowsService bên host Windows). -->
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.Hosting.Systemd" Version="10.0.12" />
+  </ItemGroup>
+</Project>
