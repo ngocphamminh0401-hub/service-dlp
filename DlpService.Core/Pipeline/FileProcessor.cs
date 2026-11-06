@@ -1,300 +1,64 @@
-// [Thay đổi] Thêm namespace theo folder Watching/ và using để dùng FileReaderService (nay nằm ở namespace Reading)
+// [Thay đổi] File mới (kế hoạch tách lõi, bước 3): pipeline xử lý MỘT file — tra cache → đọc → băm → quét regex → phân loại →
+// chấm S1 + Router + FileConfidence → ghi DB. Trước đây nằm trong FileWatcherService.ProcessFile cùng với FileSystemWatcher và debounce;
+// chỉ phần theo dõi thư mục mới phụ thuộc hệ điều hành, còn pipeline này là logic thuần nên tách ra để dùng chung cho mọi nền tảng.
+// QUAN TRỌNG: thân các hàm được DI CHUYỂN NGUYÊN VĂN từ FileWatcherService, không đổi logic (chỉ đổi chỗ gọi Mask và Escalate).
 using DlpService.Classification;
+using DlpService.Platform; // [Thay đổi] Tách lõi bước 4: IPathPolicy
 using DlpService.Reading;
 using DlpService.Scanning;
-using DlpService.Storage; // [Thay đổi] Ghi finding + scan_result vào SQLite
-using System.Collections.Concurrent; // [Thay đổi] Dùng ConcurrentDictionary cho các dict bị nhiều luồng truy cập
-using System.Text.Json; // [Thay đổi] labels_json
-using System.Text;
+using DlpService.Storage; // Ghi finding + scan_result vào SQLite
+using System.Collections.Concurrent;
+using System.Text.Json;
 
-namespace DlpService.Watching;
+namespace DlpService.Pipeline;
 
-/// <summary>Theo dõi 1 thư mục, debounce sự kiện, đọc file rồi quét bằng RegexScanner khi có file mới/đổi.</summary>
-/// <remarks>[Sửa lỗi] Nơi tạo PHẢI giữ tham chiếu mạnh tới đối tượng này suốt thời gian theo dõi (VD trường của Worker):
-/// FileSystemWatcher của .NET chỉ tự giữ mình bằng tham chiếu yếu, không ai giữ thì GC thu hồi và việc theo dõi dừng âm thầm.</remarks>
-// [Sửa lỗi] + IDisposable: tắt watcher và huỷ các lần xử lý đang chờ debounce khi service dừng
-public class FileWatcherService : IDisposable
+// [Thay đổi] Cache file_state: kết quả xử lý 1 file (để ScanExistingFiles đếm)
+public enum ProcessOutcome
+{
+    /// <summary>Đã quét (và ghi DB nếu có).</summary>
+    Scanned,
+    /// <summary>Không đổi so với lần quét trước → bỏ qua.</summary>
+    Unchanged,
+    /// <summary>Đọc file thất bại.</summary>
+    Failed
+}
+
+/// <summary>Xử lý 1 file: đọc, quét, phân loại và ghi kết quả. Gọi được từ nhiều luồng cùng lúc (việc giới hạn số luồng do bên gọi lo).</summary>
+public sealed class FileProcessor
 {
     private readonly FileReaderService _fileReader;
-    private readonly RegexScanner _scanner; // [Thay đổi] scanner nhận từ ngoài, dùng để quét nội dung file
+    private readonly RegexScanner _scanner; // scanner nhận từ ngoài, dùng để quét nội dung file
     private readonly ClassificationEngine _engine;
-    // [Thay đổi] Bước B (checklist "chạy như Windows Service thật"): thay Console.WriteLine bằng ILogger —
-    // Console không ai đọc khi chạy dưới Service Control Manager (không có console đính kèm).
     private readonly ILogger _logger;
-    // [Thay đổi] Dictionary -> ConcurrentDictionary: dict này bị luồng watcher (ScheduleProcess) và luồng
-    // ThreadPool (finally của ProcessAfterDebounceAsync) cùng đọc/ghi — Dictionary thường có thể hỏng dữ liệu.
-    private readonly ConcurrentDictionary<string, CancellationTokenSource> _pendingTimers = new(); // dict được tạo ngay khi khai báo
+    private readonly RouterOptions _routerOptions; // ngưỡng định tuyến (đọc từ appsettings.json mục "Score" ở Worker)
+    private readonly ResultStore? _store; // kho kết quả SQLite (null = không ghi)
+    private readonly EscalationOptions _escalation; // eligibility + phân nhóm P1/P2/P3
+    private readonly FileConfidenceScorer? _fileConfidence; // null = không nạp được model → bỏ qua
 
-    // [Thay đổi] Nhóm D (checklist "chạy như Windows Service thật") - "bỏ qua quét trùng khi nội dung không
-    // đổi": lưu hash nội dung lần quét gần nhất theo từng file, để nhận ra khi nhiều sự kiện watcher (Created/
-    // Changed/Renamed) rời rạc cùng trỏ tới 1 lần lưu file thực tế (VD VS Code ghi file làm nhiều bước) không
-    // bị quét/log lặp lại nhiều lần cho cùng 1 nội dung.
-    // [Thay đổi] Dictionary -> ConcurrentDictionary: nhiều Task debounce và ScanExistingFiles (gọi từ
-    // OnWatcherError) có thể cùng gọi ProcessFile -> cùng đọc/ghi dict này một lúc.
+    // Đường dẫn của file TÍNH TỪ thư mục đang theo dõi (để xét từ khoá P2). Do FileWatcherService cung cấp vì chỉ nó biết các thư mục gốc.
+    private readonly Func<string, string> _relativePathOf;
+
+    // [Thay đổi] Tách lõi bước 4: quy tắc đường dẫn theo hệ điều hành (dùng khi xét đường dẫn loại trừ LLM)
+    private readonly IPathPolicy _pathPolicy;
+
+    // Hash nội dung lần quét gần nhất theo từng file: nhận ra nhiều sự kiện watcher rời rạc cùng trỏ tới 1 lần lưu file thực tế.
+    // ConcurrentDictionary vì nhiều Task debounce và lượt quét khởi động có thể cùng xử lý.
     private readonly ConcurrentDictionary<string, string> _lastContentHash = new();
 
-    // [Thay đổi] Nhóm D3: giữ watcher ở field thay vì biến cục bộ trong StartWatching — biến cục bộ sẽ mất
-    // tham chiếu khi hàm kết thúc, GC có thể thu hồi watcher khiến service "câm" không rõ lý do.
-    // [Sửa lỗi] Field này CHỈ đủ khi chính FileWatcherService còn được giữ — trước đây Worker giữ nó bằng biến cục bộ nên vẫn bị thu
-    // hồi khi rảnh (xem Worker._fileWatcher). Tham chiếu mạnh phải nối liền từ Worker → FileWatcherService → FileSystemWatcher.
-    private FileSystemWatcher? _watcher;
-
-    // [Thay đổi] Nhóm D3: nhớ thư mục đang theo dõi để OnWatcherError biết chỗ quét lại khi buffer bị tràn.
-    private string _watchFolder = string.Empty;
-
-    /// <summary>Tạo watcher với 1 scanner đã có sẵn rule để dùng khi quét file.</summary>
-    /// <param name="scanner">Bộ quét regex, đã nạp rule từ trước.</param>
-    /// <param name="engine">Engine phân loại theo domain, đã tự nạp module từ trước.</param>
-    /// <param name="logger">Nơi ghi log kết quả (Console khi chạy tay, Event Log khi chạy dưới SCM).</param>
-    /// <param name="routerOptions">[Thay đổi] Router ba vùng: ngưỡng T_high/T_low; null = mặc định 0,90/0,30.</param>
-    /// <param name="store">[Thay đổi] Ghi scan_result/finding vào SQLite; null = không ghi DB (VD mở DB thất bại).</param>
-    /// <param name="escalation">[Thay đổi] Eligibility + phân nhóm P1/P2/P3; null = mặc định.</param>
-    /// <param name="maxConcurrency">[Thay đổi] Số file tối đa xử lý cùng lúc (≥ 1); mặc định <see cref="DefaultMaxConcurrency"/>.</param>
-    public FileWatcherService(RegexScanner scanner, ClassificationEngine engine, ILogger logger, RouterOptions? routerOptions = null,
-        ResultStore? store = null, EscalationOptions? escalation = null, FileConfidenceScorer? fileConfidence = null,
-        int maxConcurrency = DefaultMaxConcurrency)
+    public FileProcessor(FileReaderService fileReader, RegexScanner scanner, ClassificationEngine engine, ILogger logger,
+        RouterOptions routerOptions, ResultStore? store, EscalationOptions escalation, FileConfidenceScorer? fileConfidence,
+        Func<string, string> relativePathOf, IPathPolicy pathPolicy)
     {
-        MaxConcurrency = Math.Max(1, maxConcurrency); // [Thay đổi] Giới hạn đồng thời: cấu hình sai (≤ 0) thì vẫn chạy được 1 file
-        _gate = new SemaphoreSlim(MaxConcurrency, MaxConcurrency);
-        _fileReader = new FileReaderService();
+        _pathPolicy = pathPolicy;
+        _fileReader = fileReader;
         _scanner = scanner;
         _engine = engine;
         _logger = logger;
-        _routerOptions = routerOptions ?? new RouterOptions(); // [Thay đổi] Router ba vùng
-        _store = store; // [Thay đổi] Ghi finding + scan_result
-        _escalation = escalation ?? new EscalationOptions(); // [Thay đổi] Eligibility + P1/P2/P3
-        _fileConfidence = fileConfidence; // [Thay đổi] FileConfidence 2 nhánh (shadow)
-    }
-
-    // [Thay đổi] Giới hạn số file xử lý cùng lúc (Watch:MaxConcurrency). Trước đây mỗi sự kiện file là 1 task chạy ngay → khi burst
-    // service tự chạy ~19–33 file song song, đúng vùng thông lượng giảm. Đo DlpConcurrencyBench 29/10 (docs/buoi-15-tom-tat.md):
-    // thông lượng bão hoà từ 6 luồng (895 file/s), 6 luồng có p95 14,5 ms so với 21 ms (8) / 39 ms (16), RAM thấp hơn.
-    /// <summary>Số file xử lý cùng lúc mặc định khi không cấu hình.</summary>
-    public const int DefaultMaxConcurrency = 6;
-
-    /// <summary>Số file tối đa xử lý cùng lúc (đã chặn ≥ 1).</summary>
-    public int MaxConcurrency { get; }
-
-    // "Trạm gác": chỉ cho MaxConcurrency lần ProcessFile chạy cùng lúc, các file khác xếp hàng chờ. Không Dispose: task đang chạy dở
-    // khi service dừng vẫn cần Release.
-    private readonly SemaphoreSlim _gate;
-
-    // [Thay đổi] FileConfidence 2 nhánh (shadow): null = không nạp được model → bỏ qua, không ảnh hưởng luồng quét
-    private readonly FileConfidenceScorer? _fileConfidence;
-
-    // [Thay đổi] Eligibility + phân nhóm P1/P2/P3 (đọc từ appsettings.json mục "Llm" ở Worker)
-    private readonly EscalationOptions _escalation;
-
-    // [Thay đổi] Ghi finding + scan_result: kho kết quả SQLite (null = không ghi)
-    private readonly ResultStore? _store;
-
-    // [Thay đổi] Router ba vùng: ngưỡng định tuyến (đọc từ appsettings.json mục "Score" ở Worker)
-    private readonly RouterOptions _routerOptions;
-
-    /// <summary>Bắt đầu theo dõi thư mục (mọi định dạng FileReaderService đọc được, kể cả thư mục con) và lắng nghe sự kiện Created/Changed/Renamed.</summary>
-    /// <param name="folderPath">Đường dẫn thư mục cần theo dõi.</param>
-    public void StartWatching(string folderPath)
-    {
-        // [Thay đổi] Nhóm D3: lưu lại thư mục và dùng field _watcher thay cho biến cục bộ "var watcher"
-        _watchFolder = folderPath;
-        _watcher = new FileSystemWatcher(folderPath)
-        {
-            // [Thay đổi] Mở rộng định dạng: bỏ "Filter = *.txt" cố định — danh sách đuôi lấy từ FileReaderService
-            // (thêm vào Filters ngay dưới), để thêm định dạng mới không phải sửa watcher.
-            // [Thay đổi] Nhóm D2 - mặc định FileSystemWatcher chỉ theo dõi ĐÚNG 1 cấp thư mục, bỏ sót mọi
-            // thư mục con. Bật lên để nhìn xuyên xuống toàn bộ cây thư mục con của watch-folder.
-            IncludeSubdirectories = true,
-            // [Thay đổi] Nhóm D3: tăng buffer từ 8KB (mặc định) lên 64KB (mức tối đa khuyến nghị) để giảm
-            // khả năng tràn khi nhiều file đổi dồn dập. Tăng hơn nữa sẽ tốn bộ nhớ kernel (non-paged pool).
-            InternalBufferSize = 64 * 1024
-        };
-        // [Thay đổi] Mở rộng định dạng: mỗi đuôi hỗ trợ 1 filter ("*.txt", "*.docx", ...)
-        foreach (var extension in _fileReader.SupportedExtensions)
-        {
-            _watcher.Filters.Add("*" + extension);
-        }
-        _watcher.Created += OnFileChanged;
-        _watcher.Changed += OnFileChanged;
-        _watcher.Renamed += OnFileRenamed;
-        // [Thay đổi] Nhóm D3: nghe sự kiện Error — nếu không đăng ký, lỗi tràn buffer/mất thư mục trôi đi âm thầm
-        _watcher.Error += OnWatcherError;
-
-        _watcher.EnableRaisingEvents = true;
-        _logger.LogInformation("[FileWatcher] Xử lý tối đa {max} file cùng lúc", MaxConcurrency); // [Thay đổi] Giới hạn đồng thời
-
-        // [Thay đổi] Nhóm D1 - FileSystemWatcher chỉ bắt sự kiện XẢY RA SAU khi bắt đầu theo dõi; file đã
-        // nằm sẵn trong thư mục TRƯỚC lúc service khởi động (VD sau khi máy reboot) sẽ không bao giờ được
-        // quét nếu không chủ động quét 1 lượt ngay tại đây.
-        ScanExistingFiles(folderPath);
-    }
-
-    // [Thay đổi] Nhóm D1: quét mọi file *.txt đang có sẵn (kể cả thư mục con, khớp IncludeSubdirectories ở
-    // trên) ngay lúc bắt đầu theo dõi — dùng lại ĐÚNG logic xử lý 1 file (ProcessFile) mà luồng sự kiện
-    // watcher vẫn dùng, không viết riêng 1 bản dễ lệch nhau.
-    private void ScanExistingFiles(string folderPath)
-    {
-        if (!Directory.Exists(folderPath))
-        {
-            return;
-        }
-
-        // [Thay đổi] Cache file_state: đếm số file quét / bỏ qua để log 1 dòng tổng kết (từng file bỏ qua chỉ log Debug)
-        int total = 0, scanned = 0, unchanged = 0;
-
-        // [Thay đổi] Mở rộng định dạng: duyệt mọi file rồi lọc bằng IsSupported, thay cho mẫu "*.txt" cố định. Không
-        // dùng mẫu "*.xls" của Directory.GetFiles vì trên Windows nó khớp NHẦM cả ".xlsx" (quirk tên 8.3).
-        foreach (var filePath in Directory.EnumerateFiles(folderPath, "*", SearchOption.AllDirectories).Where(_fileReader.IsSupported))
-        {
-            total++;
-            // [Thay đổi] Giới hạn đồng thời: lượt quét này chạy song song với file từ sự kiện watcher (watcher đã bật trước) → cũng phải
-            // xin chỗ ở trạm gác, để tổng số file xử lý cùng lúc không vượt MaxConcurrency
-            _gate.Wait();
-            ProcessOutcome outcome;
-            try
-            {
-                outcome = ProcessFile(filePath);
-            }
-            finally
-            {
-                _gate.Release();
-            }
-            switch (outcome)
-            {
-                case ProcessOutcome.Scanned: scanned++; break;
-                case ProcessOutcome.Unchanged: unchanged++; break;
-            }
-        }
-
-        _logger.LogInformation("[FileWatcher] Quét {folder}: {total} file — quét {scanned}, bỏ qua {unchanged} không đổi, lỗi đọc {failed}",
-            folderPath, total, scanned, unchanged, total - scanned - unchanged);
-    }
-
-    // [Thay đổi] Cache file_state: kết quả xử lý 1 file (để ScanExistingFiles đếm)
-    private enum ProcessOutcome
-    {
-        /// <summary>Đã quét (và ghi DB nếu có).</summary>
-        Scanned,
-        /// <summary>Không đổi so với lần quét trước → bỏ qua.</summary>
-        Unchanged,
-        /// <summary>Đọc file thất bại.</summary>
-        Failed
-    }
-
-    private void OnFileChanged(object sender, FileSystemEventArgs e)
-    {
-        ScheduleProcess(e.FullPath);
-    }
-
-    // [Thay đổi] Nhiều trình soạn thảo (VD VS Code) "tạo file mới" bằng cách ghi ra file tạm rồi ĐỔI TÊN
-    // thành tên thật — thao tác đó chỉ phát sự kiện Renamed, KHÔNG phát Created lẫn Changed, nên watcher cũ
-    // (chỉ nghe 2 sự kiện đó) bỏ sót hoàn toàn những file tạo theo kiểu này.
-    private void OnFileRenamed(object sender, RenamedEventArgs e)
-    {
-        ScheduleProcess(e.FullPath);
-    }
-
-    // [Thay đổi] Nhóm D3: xử lý lỗi của watcher, chia 2 trường hợp:
-    //  - Tràn buffer: watcher VẪN chạy nhưng đã mất 1 số sự kiện -> log cảnh báo rồi quét lại cả thư mục để
-    //    bù file bị sót (_lastContentHash sẽ tự bỏ qua file nội dung không đổi, nên không bị log lặp).
-    //  - Lỗi khác (thư mục bị xoá, mất quyền, mất mạng...): watcher có thể đã ngừng hẳn -> log lỗi rõ ràng.
-    //    Việc tự khởi động lại watcher để dành cho bước sau.
-    private void OnWatcherError(object sender, ErrorEventArgs e)
-    {
-        var ex = e.GetException();
-
-        if (ex is InternalBufferOverflowException)
-        {
-            _logger.LogWarning("[FileWatcher] Buffer tràn, có thể đã mất sự kiện — quét lại toàn thư mục {folder}", _watchFolder);
-
-            // [Thay đổi] Bọc try/catch quanh lượt quét bù: OnWatcherError chạy trên luồng ThreadPool, exception
-            // không được bắt ở đây sẽ làm SẬP cả service. Bắt lại -> ghi log -> service vẫn tiếp tục theo dõi.
-            try
-            {
-                ScanExistingFiles(_watchFolder);
-            }
-            catch (Exception scanEx)
-            {
-                _logger.LogError(scanEx, "[FileWatcher] Quét bù sau khi tràn buffer thất bại {folder}", _watchFolder);
-            }
-        }
-        else
-        {
-            _logger.LogError(ex, "[FileWatcher] Watcher gặp lỗi, có thể đã ngừng theo dõi {folder}", _watchFolder);
-        }
-    }
-
-    // [Thay đổi] Gộp logic debounce dùng chung cho cả 3 sự kiện (Created/Changed/Renamed) — trước đây chỉ
-    // OnFileChanged có, giờ tách ra để OnFileRenamed dùng lại được, không chép lặp code.
-    private void ScheduleProcess(string filePath)
-    {
-        // [Thay đổi] Mở rộng định dạng: bỏ qua file khoá tạm của Office ("~$baocao.docx") — Filters "*.docx" vẫn
-        // khớp những file này nên phải lọc lại ở đây
-        if (!_fileReader.IsSupported(filePath))
-        {
-            return;
-        }
-
-        if(_pendingTimers.TryGetValue(filePath, out var oldCts))
-        {
-            oldCts.Cancel();
-        }
-
-        var newCts = new CancellationTokenSource();
-        _pendingTimers[filePath] = newCts;
-
-        // [Thay đổi] Truyền cả CTS (thay vì chỉ Token) để finally dùng được TryRemove(KeyValuePair) so sánh đúng CTS
-        _ = ProcessAfterDebounceAsync(filePath, newCts);
-    }
-
-    // [Thay đổi] Tham số đổi từ CancellationToken sang CancellationTokenSource (xem finally bên dưới)
-    private async Task ProcessAfterDebounceAsync(string filePath, CancellationTokenSource myCts)
-    {
-        try
-        {
-            await Task.Delay(300, myCts.Token);
-
-            // [Thay đổi] Giới hạn đồng thời: xin chỗ trước khi xử lý. Đang xếp hàng mà có sự kiện mới hơn cho cùng file (hoặc service
-            // dừng) thì huỷ được ngay — không giữ chỗ cho 1 nội dung đã cũ.
-            await _gate.WaitAsync(myCts.Token);
-            try
-            {
-                ProcessFile(filePath);
-            }
-            finally
-            {
-                _gate.Release();
-            }
-        }
-        // [Thay đổi] TaskCanceledException → OperationCanceledException (lớp cha): huỷ khi đang chờ ở trạm gác cũng thuộc loại này
-        catch (OperationCanceledException)
-        {
-            // Sự kiện mới hơn đã đến, bỏ qua lần xử lý này
-        }
-        catch (Exception ex)
-        {
-            // [Thay đổi] Nhóm D - bọc try/catch rộng: trước đây chỉ bắt TaskCanceledException, 1 lỗi bất ngờ
-            // khi đọc/quét file (file bị khoá, encoding lạ, hết dung lượng đĩa...) sẽ trở thành exception
-            // "unobserved" trong Task chạy rời (_ = ProcessAfterDebounceAsync(...)) — không crash service
-            // nhưng cũng không ai biết đã xảy ra. Bắt lại và ghi rõ vào log thay vì để trôi đi âm thầm.
-            _logger.LogError(ex, "[FileWatcher] Lỗi xử lý file {filePath}", filePath);
-        }
-        finally
-        {
-            // [Thay đổi] Chuyển từ cuối khối try sang finally: đảm bảo LUÔN dọn _pendingTimers dù xử lý
-            // thành công, bị huỷ (TaskCanceledException), hay gặp lỗi bất ngờ (catch Exception ở trên) —
-            // trước đây nếu có lỗi bất ngờ, dòng dọn dẹp này sẽ KHÔNG chạy, khiến filePath bị kẹt trong dict.
-            //
-            // [Thay đổi] Race condition: chỉ xoá entry nếu nó vẫn đúng là CTS của CHÍNH lần chạy này — nếu 1
-            // sự kiện MỚI HƠN đã đến trong lúc lần chạy này đang xử lý (quá điểm Task.Delay có thể huỷ được),
-            // _pendingTimers[filePath] lúc này đã bị ghi đè bằng CTS của lần chạy mới. Xoá vô điều kiện sẽ xoá
-            // NHẦM CTS của lần chạy mới đó, khiến 1 sự kiện thứ 3 đến sau không còn huỷ được nó — phá vỡ đúng
-            // cơ chế debounce.
-            //
-            // [Thay đổi] Thay cặp "TryGetValue rồi Remove" (2 bước rời, luồng khác có thể chen vào giữa) bằng
-            // TryRemove(KeyValuePair): ConcurrentDictionary chỉ xoá khi value hiện tại ĐÚNG là myCts, và làm
-            // việc so sánh + xoá liền 1 bước (atomic) — không luồng nào chen vào giữa được.
-            _pendingTimers.TryRemove(new KeyValuePair<string, CancellationTokenSource>(filePath, myCts));
-        }
+        _routerOptions = routerOptions;
+        _store = store;
+        _escalation = escalation;
+        _fileConfidence = fileConfidence;
+        _relativePathOf = relativePathOf;
     }
 
     // [Thay đổi] Tách ra từ ProcessAfterDebounceAsync: phần "đọc file -> kiểm tra trùng hash -> quét ->
@@ -302,7 +66,7 @@ public class FileWatcherService : IDisposable
     // luồng sự kiện watcher (qua ProcessAfterDebounceAsync) LẪN ScanExistingFiles (quét khi khởi động, Nhóm D1),
     // tránh viết 2 bản logic dễ lệch nhau.
     // [Thay đổi] Cache file_state: trả ProcessOutcome thay cho void để ScanExistingFiles đếm được số file bỏ qua
-    private ProcessOutcome ProcessFile(string filePath)
+    public ProcessOutcome ProcessFile(string filePath)
     {
         // [Thay đổi] Đo hiệu năng service thật: bấm giờ từng bước, ghi 1 dòng [Perf] ở cuối mỗi file ĐÃ QUÉT (file bỏ qua
         // nhờ cache không ghi). Mốc thời gian lấy bằng Stopwatch (độ phân giải < 1 µs), không ảnh hưởng luồng xử lý.
@@ -437,7 +201,7 @@ public class FileWatcherService : IDisposable
                     // [Thay đổi] Bậc 3 #7: thêm điểm tin cậy ("—" nếu rule không khai confidence), để quan sát phân bố
                     // điểm thật mà chỉnh min_confidence của từng rule
                     _logger.LogInformation(" - {pattern} tại vị trí {index}: {masked} (tin cậy {confidence})",
-                        m.PatternName, m.Index, Mask(m.Value), m.Confidence?.ToString("0.00") ?? "—");
+                        m.PatternName, m.Index, LogMasking.Mask(m.Value), m.Confidence?.ToString("0.00") ?? "—");
                 }
                 var context = new ScanContext
                 {
@@ -542,32 +306,6 @@ public class FileWatcherService : IDisposable
         }
     }
 
-    // [Sửa lỗi] Watcher bị GC thu hồi: dừng theo dõi CHỦ ĐỘNG khi service dừng (thay vì chờ GC), huỷ các file đang chờ debounce
-    // (chưa bắt đầu đọc) để không xử lý tiếp lúc DB sắp đóng. File ĐANG xử lý dở thì để chạy nốt — ResultStore tự bỏ qua khi đã đóng.
-    /// <summary>Dừng theo dõi thư mục và huỷ các lần xử lý đang chờ.</summary>
-    public void Dispose()
-    {
-        var watcher = Interlocked.Exchange(ref _watcher, null);
-        if (watcher != null)
-        {
-            watcher.EnableRaisingEvents = false;
-            watcher.Dispose();
-        }
-
-        foreach (var cts in _pendingTimers.Values)
-        {
-            try
-            {
-                cts.Cancel();
-            }
-            catch (ObjectDisposedException)
-            {
-                // Lần xử lý đó vừa xong và tự dọn — bỏ qua
-            }
-        }
-        GC.SuppressFinalize(this);
-    }
-
     // [Thay đổi] Cache file_state: đọc cache từ DB. Không có DB hoặc lỗi DB → coi như không có cache, quét bình thường
     // (lỗi lưu trữ không được làm dừng luồng quét — kiến trúc mục 10)
     private FileStateInfo? TryGetCached(string filePath)
@@ -633,11 +371,12 @@ public class FileWatcherService : IDisposable
     }
 
     // [Thay đổi] Eligibility + P1/P2/P3: từ khoá P2 chỉ xét phần đường dẫn TÍNH TỪ thư mục đang theo dõi (tên thư mục cha của
-    // watch-folder không phải tín hiệu). Chưa StartWatching (_watchFolder rỗng) → chỉ xét tên file.
+    // watch-folder không phải tín hiệu). Chưa StartWatching → chỉ xét tên file.
     private EscalationDecision Escalate(RouteZone zone, int textLength, string filePath, string hash, bool needsOcr = false)
     {
-        string relative = _watchFolder.Length > 0 ? Path.GetRelativePath(_watchFolder, filePath) : Path.GetFileName(filePath);
-        return EscalationPolicy.Decide(zone, textLength, filePath, relative, hash, _escalation, needsOcr);
+        // [Thay đổi] Tách lõi bước 3: việc tìm thư mục gốc đang theo dõi thuộc FileWatcherService (nó giữ danh sách thư mục), nên nhận qua delegate
+        string relative = _relativePathOf(filePath);
+        return EscalationPolicy.Decide(zone, textLength, filePath, relative, hash, _escalation, needsOcr, _pathPolicy); // [Thay đổi] Tách lõi bước 4: + _pathPolicy
     }
 
     // [Thay đổi] Hạn ngạch: log kết quả tạo job (không log gì khi không cần LLM / job đã có)
@@ -685,17 +424,4 @@ public class FileWatcherService : IDisposable
     // Dictionary. [Thay đổi] mục 4.12: dùng chung Storage.ContentHash — Worker LLM (Pass 2) cũng phải băm y hệt cách
     // này để so với file_hash đã lưu, nếu không sẽ luôn báo "file đã đổi" dù thật ra không đổi gì.
     private static string ComputeContentHash(string content) => Storage.ContentHash.Compute(content);
-
-    // [Thay đổi] Hàm phụ mới: che giá trị nhạy cảm trước khi log, ví dụ "012345678901" -> "012******901"
-    private static string Mask(string value)
-    {
-        // Chuỗi quá ngắn (<= 6 ký tự) thì che hết
-        if (value.Length <= 6)
-        {
-            return "***";
-        }
-
-        // Giữ 3 ký tự đầu và 3 ký tự cuối, phần giữa thay bằng dấu *
-        return value[..3] + new string('*', value.Length - 6) + value[^3..];
-    }
 }

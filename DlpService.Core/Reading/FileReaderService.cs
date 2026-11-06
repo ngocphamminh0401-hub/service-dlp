@@ -4,6 +4,7 @@
 using System.Diagnostics;
 using System.Reflection;
 using System.Text;
+using DlpService.Platform; // [Thay đổi] Tách lõi bước 4: IPathPolicy
 using DlpService.Text;
 
 namespace DlpService.Reading;
@@ -30,9 +31,14 @@ public class FileReaderService
         Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
     }
 
+    // [Thay đổi] Tách lõi bước 4: quy tắc đường dẫn theo hệ điều hành (file tạm nào bị bỏ qua) — trước đây chặn "~$" viết cứng trong IsSupported
+    private readonly IPathPolicy _pathPolicy;
+
     /// <summary>Tạo service và tự nạp mọi IContentExtractor có trong project (qua reflection).</summary>
-    public FileReaderService()
+    /// <param name="pathPolicy">[Thay đổi] Tách lõi bước 4: quy tắc đường dẫn; null = CaseInsensitivePathPolicy (hành vi Windows như trước đây).</param>
+    public FileReaderService(IPathPolicy? pathPolicy = null)
     {
+        _pathPolicy = pathPolicy ?? new CaseInsensitivePathPolicy();
         // Tìm mọi class (không abstract) implement IContentExtractor, có constructor không tham số → tạo 1 instance
         // [Thay đổi] Tika native chế độ Replace: tạo instance TRƯỚC rồi mới sắp xếp, vì Priority chỉ biết được sau khi tạo
         // (Tika native đọc cấu hình lúc chạy). Priority cao đăng ký trước → thắng khi trùng đuôi; bằng nhau thì theo tên class.
@@ -87,7 +93,8 @@ public class FileReaderService
     {
         // Office tạo file "~$tên.docx" (vài trăm byte, chỉ chứa tên người đang mở) khi mở tài liệu — không phải
         // nội dung thật, đọc sẽ lỗi định dạng và làm rác log
-        if (Path.GetFileName(filePath).StartsWith("~$", StringComparison.Ordinal))
+        // [Thay đổi] Tách lõi bước 4: việc nhận biết file tạm do IPathPolicy quyết định (Windows: "~$"; Linux sau này: .swp, ~, .part...)
+        if (_pathPolicy.IsTemporaryFile(filePath))
         {
             return false;
         }

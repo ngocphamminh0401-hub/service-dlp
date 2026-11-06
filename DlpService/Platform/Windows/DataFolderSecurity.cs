@@ -5,7 +5,7 @@ using System.Runtime.Versioning;
 using System.Security.AccessControl;
 using System.Security.Principal;
 
-namespace DlpService.Storage;
+namespace DlpService.Platform.Windows;
 
 /// <summary>Đặt ACL chặt cho thư mục dữ liệu của service.</summary>
 [SupportedOSPlatform("windows")]

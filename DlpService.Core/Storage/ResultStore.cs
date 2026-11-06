@@ -2,6 +2,7 @@
 // docs/kien-truc-trien-khai.md — 3 bảng file_state, scan_result, finding (bảng llm_* làm khi có LLM). Nguyên tắc P3: kết
 // quả regex luôn được ghi trước. KHÔNG lưu giá trị khớp (CCCD, số tài khoản...) vào bất kỳ bảng nào.
 using System.Globalization;
+using DlpService.Platform; // [Thay đổi] Tách lõi bước 4: IDataFolderGuard
 using Microsoft.Data.Sqlite;
 
 namespace DlpService.Storage;
@@ -89,14 +90,16 @@ public sealed partial class ResultStore : IDisposable
     /// của service vì sẽ bị khoá quyền.</param>
     /// <param name="logger">[Thay đổi] Ghi cảnh báo khi ACL/PRAGMA không như mong muốn (không bắt buộc).</param>
     /// <param name="quota">[Thay đổi] Hạn ngạch job P1/P2/P3 + giới hạn hàng đợi; null = mặc định.</param>
-    public ResultStore(string dbPath, ILogger? logger = null, JobQuotaOptions? quota = null)
+    /// <param name="guard">[Thay đổi] Tách lõi bước 4: khoá quyền thư mục dữ liệu (Windows: ACL; Linux: chmod). null = KHÔNG khoá và ghi cảnh báo —
+    /// chỉ chấp nhận cho test/tool; host của service thật phải truyền guard của hệ điều hành mình.</param>
+    public ResultStore(string dbPath, ILogger? logger = null, JobQuotaOptions? quota = null, IDataFolderGuard? guard = null)
     {
         _quota = quota ?? new JobQuotaOptions(); // [Thay đổi] Hạn ngạch
         string? folder = Path.GetDirectoryName(Path.GetFullPath(dbPath));
         if (!string.IsNullOrEmpty(folder))
         {
             Directory.CreateDirectory(folder);
-            RestrictFolder(folder, logger); // [Thay đổi] ACL thư mục dữ liệu, trước khi tạo file DB
+            RestrictFolder(folder, guard, logger); // [Thay đổi] khoá quyền thư mục dữ liệu, trước khi tạo file DB
         }
 
         _connection = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = dbPath }.ToString());
@@ -304,30 +307,33 @@ public sealed partial class ResultStore : IDisposable
         }
     }
 
-    // [Thay đổi] Khoá ACL thư mục dữ liệu. Lỗi (không đủ quyền đổi ACL...) chỉ cảnh báo, không dừng service — cùng
+    // [Thay đổi] Khoá quyền thư mục dữ liệu. Lỗi (không đủ quyền đổi quyền...) chỉ cảnh báo, không dừng service — cùng
     // nguyên tắc "lỗi lưu trữ không làm dừng luồng quét". Không khoá gốc ổ đĩa (VD DbPath = "D:\dlp.db") vì sẽ khoá
     // cả ổ với mọi người dùng khác.
-    private static void RestrictFolder(string folder, ILogger? logger)
+    // [Thay đổi] Tách lõi bước 4: không còn gọi thẳng DataFolderSecurity (ACL Windows) sau OperatingSystem.IsWindows() — việc khoá do
+    // IDataFolderGuard của hệ điều hành đảm nhiệm, nên lõi không phụ thuộc API Windows.
+    private static void RestrictFolder(string folder, IDataFolderGuard? guard, ILogger? logger)
     {
-        if (!OperatingSystem.IsWindows())
+        if (guard == null)
         {
+            logger?.LogWarning("[DB] Chưa cấu hình IDataFolderGuard — thư mục dữ liệu {folder} KHÔNG được khoá quyền", folder);
             return;
         }
 
         if (string.Equals(Path.GetPathRoot(folder), folder, StringComparison.OrdinalIgnoreCase))
         {
-            logger?.LogWarning("[DB] Không đặt ACL cho {folder} vì là gốc ổ đĩa — hãy để DB trong thư mục riêng", folder);
+            logger?.LogWarning("[DB] Không đặt quyền cho {folder} vì là gốc ổ đĩa — hãy để DB trong thư mục riêng", folder);
             return;
         }
 
         try
         {
-            DataFolderSecurity.Restrict(folder);
-            logger?.LogInformation("[DB] Đã khoá quyền thư mục dữ liệu {folder} (SYSTEM, Administrators, tài khoản hiện tại)", folder);
+            guard.Restrict(folder);
+            logger?.LogInformation("[DB] Đã khoá quyền thư mục dữ liệu {folder} ({who})", folder, guard.Description);
         }
         catch (Exception ex)
         {
-            logger?.LogWarning(ex, "[DB] Không đặt được ACL cho {folder}, DB vẫn dùng được nhưng tài khoản khác có thể đọc", folder);
+            logger?.LogWarning(ex, "[DB] Không đặt được quyền cho {folder}, DB vẫn dùng được nhưng tài khoản khác có thể đọc", folder);
         }
     }
 
