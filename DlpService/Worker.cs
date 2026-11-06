@@ -1,4 +1,5 @@
 // [Thay đổi] Thêm using để dùng FileWatcherService (nay nằm ở namespace Watching)
+using DlpService.Platform; // [Thay đổi] Tách lõi bước 1: IAppLayout
 using DlpService.Scanning; // [Thay đổi] để dùng RuleLoader và RegexScanner
 using DlpService.Watching;
 using DlpService.Classification;
@@ -11,7 +12,8 @@ namespace DlpService;
 
 /// <summary>Điểm khởi động luồng nền: nạp rule, tạo scanner và bắt đầu theo dõi thư mục watch-folder.</summary>
 // [Thay đổi] Router ba vùng: nhận thêm IConfiguration (DI tự truyền) để đọc ngưỡng T_high/T_low từ appsettings.json
-public class Worker(ILogger<Worker> logger, IConfiguration configuration) : BackgroundService
+// [Thay đổi] Tách lõi bước 1: nhận thêm IAppLayout (DI tự truyền) — mọi thư mục rule/DB/model lấy từ đây thay vì ghép AppContext.BaseDirectory
+public class Worker(ILogger<Worker> logger, IConfiguration configuration, IAppLayout layout) : BackgroundService
 {
     // [Sửa lỗi] Watcher bị GC thu hồi khi service rảnh: trước đây FileWatcherService chỉ là BIẾN CỤC BỘ trong ExecuteAsync và không
     // được dùng sau "await Task.WhenAll" → bản Release không giữ nó trong state machine async; FileSystemWatcher của .NET chỉ tự giữ
@@ -28,7 +30,7 @@ public class Worker(ILogger<Worker> logger, IConfiguration configuration) : Back
 
         // [Thay đổi] Nạp rule từ thư mục rules/ nằm cạnh file .exe (không dùng đường dẫn tương đối,
         // vì khi chạy thành Windows Service thư mục làm việc không phải thư mục project)
-        var ruleFolder = Path.Combine(AppContext.BaseDirectory, "rules");
+        var ruleFolder = layout.RulesFolder; // [Thay đổi] Tách lõi bước 1: từ IAppLayout
         var patterns = new RuleLoader(logger).LoadFromFolder(ruleFolder);
         if (patterns.Count == 0)
         {
@@ -50,7 +52,7 @@ public class Worker(ILogger<Worker> logger, IConfiguration configuration) : Back
         }
         logger.LogInformation("Ngưỡng điểm chỗ khớp: MinConfidence={min:0.00}", minConfidence);
         var scanner = new RegexScanner(patterns, rulesVer, minConfidence);
-        var engine = new ClassificationEngine(logger);
+        var engine = new ClassificationEngine(logger, ruleFolder); // [Thay đổi] Tách lõi bước 1: truyền thư mục rule cho module compound
         // [Thay đổi] Router ba vùng: đọc mục "Score" { THigh, TLow }; thiếu hoặc sai (TLow ≥ THigh, ngoài 0-1) thì dùng
         // mặc định 0,90/0,30 + cảnh báo, không chặn service khởi động
         var routerOptions = configuration.GetSection("Score").Get<RouterOptions>() ?? new RouterOptions();
@@ -64,11 +66,8 @@ public class Worker(ILogger<Worker> logger, IConfiguration configuration) : Back
         // [Thay đổi] Ghi finding + scan_result: mở DB SQLite (mặc định <thư mục chạy>/data/dlp.db, cấu hình ở mục
         // "Storage:DbPath"; đường dẫn tương đối tính theo thư mục chạy vì thư mục làm việc của Windows Service là System32).
         // Mở thất bại → service vẫn chạy, chỉ không ghi DB (lỗi lưu trữ không được làm dừng luồng quét).
-        string dbPath = configuration["Storage:DbPath"] ?? Path.Combine("data", "dlp.db");
-        if (!Path.IsPathRooted(dbPath))
-        {
-            dbPath = Path.Combine(AppContext.BaseDirectory, dbPath);
-        }
+        // [Thay đổi] Tách lõi bước 1: đường dẫn tương đối/mặc định do IAppLayout quyết định (Windows: tính theo thư mục file chạy như cũ)
+        string dbPath = layout.ResolvePath(configuration["Storage:DbPath"] ?? layout.DefaultDbPath);
         // [Thay đổi] Eligibility + P1/P2/P3 + hạn ngạch: đọc mục "Llm" (thiếu → mặc định trong code; từ khoá P2 mặc định nằm
         // ở appsettings.json). Chặn giá trị vô lý thay vì dừng service.
         var escalation = configuration.GetSection("Llm").Get<EscalationOptions>() ?? new EscalationOptions();
@@ -118,11 +117,8 @@ public class Worker(ILogger<Worker> logger, IConfiguration configuration) : Back
         // [Thay đổi] FileConfidence 2 nhánh (shadow): nạp hệ số từ <thư mục chạy>/confidence/file-confidence-v1.json (đổi được
         // qua "FileConfidence:ModelPath"). Lỗi → cảnh báo, service chạy tiếp không có điểm này (chỉ là tín hiệu quan sát).
         FileConfidenceScorer? fileConfidence = null;
-        string confPath = configuration["FileConfidence:ModelPath"] ?? Path.Combine("confidence", "file-confidence-v1.json");
-        if (!Path.IsPathRooted(confPath))
-        {
-            confPath = Path.Combine(AppContext.BaseDirectory, confPath);
-        }
+        // [Thay đổi] Tách lõi bước 1: như dbPath ở trên, qua IAppLayout
+        string confPath = layout.ResolvePath(configuration["FileConfidence:ModelPath"] ?? layout.DefaultConfidenceModelPath);
         try
         {
             fileConfidence = new FileConfidenceScorer(FileConfidenceModel.Load(confPath));

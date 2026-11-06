@@ -3,6 +3,7 @@
 // rules_ver hiện tại (đọc rule trên đĩa) với rules_ver đã lưu lúc quét, để biết rule có đổi từ đó tới giờ hay không.
 // Không in giá trị thật của file — mọi bảng nguồn (finding/llm_result) vốn đã không lưu giá trị thật (mục 5 CLAUDE.md).
 using DlpService.Classification;
+using DlpService.Platform;
 using DlpService.Scanning;
 using DlpService.Storage;
 using Microsoft.Extensions.Configuration;
@@ -27,11 +28,9 @@ public static class ExplainCommand
             .Build();
 
         // [Thay đổi] Cùng cách đọc DbPath như Worker.cs, để chẩn đoán đúng DB service thật đang dùng
-        string dbPath = config["Storage:DbPath"] ?? Path.Combine("data", "dlp.db");
-        if (!Path.IsPathRooted(dbPath))
-        {
-            dbPath = Path.Combine(AppContext.BaseDirectory, dbPath);
-        }
+        // [Thay đổi] Tách lõi bước 1: dùng IAppLayout như Worker để chẩn đoán đúng DB/rule mà service thật dùng
+        IAppLayout layout = new ExecutableAppLayout();
+        string dbPath = layout.ResolvePath(config["Storage:DbPath"] ?? layout.DefaultDbPath);
 
         if (!File.Exists(dbPath))
         {
@@ -48,7 +47,7 @@ public static class ExplainCommand
         }
 
         // [Thay đổi] Đọc lại rule trên đĩa để so sánh — chỉ để CẢNH BÁO drift, không dùng để tính lại gì cả
-        var ruleFolder = Path.Combine(AppContext.BaseDirectory, "rules");
+        var ruleFolder = layout.RulesFolder; // [Thay đổi] Tách lõi bước 1
         var currentRulesVer = RuleLoader.ComputeRulesVersion(ruleFolder);
         var patterns = new RuleLoader(NullLogger.Instance).LoadFromFolder(ruleFolder);
         var scanner = new RegexScanner(patterns, currentRulesVer);

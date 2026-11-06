@@ -23,9 +23,16 @@ public class CompoundRuleModule : IClassifierModule
 
     private readonly List<CompoundRule> _rules;
 
-    public CompoundRuleModule()
+    // [Thay đổi] Tách lõi bước 1: không tự ghép AppContext.BaseDirectory nữa mà nhận thư mục rule từ ngoài (ClassificationEngine truyền
+    // vào, lấy từ IAppLayout). Constructor không tham số được GIỮ để test/tool cũ chạy như trước (mặc định: rules/ cạnh file chạy).
+    public CompoundRuleModule() : this(Path.Combine(AppContext.BaseDirectory, "rules"))
     {
-        _rules = LoadCompoundRules(Path.Combine(AppContext.BaseDirectory, "rules", "compound.json"));
+    }
+
+    /// <param name="rulesFolder">Thư mục chứa compound.json.</param>
+    public CompoundRuleModule(string rulesFolder)
+    {
+        _rules = LoadCompoundRules(Path.Combine(rulesFolder, "compound.json"));
     }
 
     /// <inheritdoc/>

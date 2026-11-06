@@ -4,13 +4,15 @@ namespace DlpService.Classification;
 // (ILogger logger) = primary constructor, giống RuleLoader: nhận logger từ ngoài, dùng ở mọi hàm
 // Engine chỉ biết interface IClassifierModule, không biết module cụ thể nào => thêm domain không phải sửa file này
 /// <summary>Tự nạp mọi module domain (qua reflection) và gộp kết quả phân loại của chúng.</summary>
-public class ClassificationEngine(ILogger logger)
+// [Thay đổi] Tách lõi bước 1: + rulesFolder (tuỳ chọn). Có giá trị thì module nào khai constructor nhận 1 tham số string sẽ được
+// truyền thư mục rule này (CompoundRuleModule cần đọc compound.json); null → mọi module dùng constructor không tham số như cũ.
+public class ClassificationEngine(ILogger logger, string? rulesFolder = null)
 {
     // Danh sách module, nạp 1 lần lúc tạo engine rồi chỉ đọc (không thêm bớt) nên nhiều luồng dùng cùng lúc vẫn an toàn
-    private readonly List<IClassifierModule> _modules = LoadModules(logger);
+    private readonly List<IClassifierModule> _modules = LoadModules(logger, rulesFolder);
 
     // Tìm mọi class implement IClassifierModule trong chương trình và tạo đối tượng từ chúng
-    private static List<IClassifierModule> LoadModules(ILogger logger)
+    private static List<IClassifierModule> LoadModules(ILogger logger, string? rulesFolder)
     {
         var modules = new List<IClassifierModule>();
 
@@ -27,7 +29,11 @@ public class ClassificationEngine(ILogger logger)
             try
             {
                 // CreateInstance tạo đối tượng từ kiểu (cần constructor public không tham số); "is ... module" vừa kiểm tra vừa ép kiểu
-                if (Activator.CreateInstance(type) is IClassifierModule module)
+                // [Thay đổi] Tách lõi bước 1: có thư mục rule và module có constructor (string) → truyền vào; không thì như cũ
+                object? instance = rulesFolder != null && type.GetConstructor([typeof(string)]) != null
+                    ? Activator.CreateInstance(type, rulesFolder)
+                    : Activator.CreateInstance(type);
+                if (instance is IClassifierModule module)
                 {
                     modules.Add(module);
                 }
