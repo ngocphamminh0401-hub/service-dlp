@@ -82,6 +82,59 @@ public abstract class FileChangeSourceContractTests : IDisposable
         Assert.True(WaitFor(() => changed.Contains(file)), "không nhận được FileChanged ở thư mục con");
     }
 
+    // [Thay đổi] Bước 7: giả lập "cp -r" / giải nén — tạo cây 3 cấp, mỗi cấp nhiều file, ghi dồn dập không nghỉ.
+    // Trên Linux đây là tình huống dễ mất sự kiện nhất (file ghi trước khi .NET kịp đăng ký watch cho thư mục con).
+    [Fact]
+    public void Chep_ca_cay_thu_muc_thi_bao_du_moi_file()
+    {
+        var changed = new ConcurrentBag<string>();
+        _source.FileChanged += changed.Add;
+        _source.Watch(_folder, [".txt"]);
+
+        var expected = new List<string>();
+        string dir = _folder;
+        foreach (var level in new[] { "a", "b", "c" })
+        {
+            dir = Path.Combine(dir, level);
+            Directory.CreateDirectory(dir);
+            for (int i = 0; i < 10; i++)
+            {
+                string file = Path.Combine(dir, $"f{i}.txt");
+                File.WriteAllText(file, "x");
+                expected.Add(file);
+            }
+        }
+
+        Assert.True(WaitFor(() => expected.All(changed.Contains)),
+            "thiếu FileChanged cho: " + string.Join(", ", expected.Where(f => !changed.Contains(f))));
+    }
+
+    // [Thay đổi] Bước 7: chuyển (mv) 1 thư mục đã có sẵn file từ NGOÀI vào thư mục đang theo dõi — không có sự kiện tạo file nào,
+    // chỉ có 1 sự kiện cho thư mục → nguồn phải tự liệt kê file bên trong.
+    [Fact]
+    public void Chuyen_thu_muc_tu_ngoai_vao_thi_bao_file_ben_trong()
+    {
+        string outside = _folder + "-ngoai";
+        string nested = Path.Combine(outside, "sau");
+        Directory.CreateDirectory(nested);
+        string file1 = Path.Combine(outside, "g.txt");
+        string file2 = Path.Combine(nested, "h.txt");
+        File.WriteAllText(file1, "x");
+        File.WriteAllText(file2, "x");
+
+        var changed = new ConcurrentBag<string>();
+        _source.FileChanged += changed.Add;
+        _source.Watch(_folder, [".txt"]);
+
+        string target = Path.Combine(_folder, "chuyen-vao");
+        Directory.Move(outside, target);
+
+        string moved1 = Path.Combine(target, "g.txt");
+        string moved2 = Path.Combine(target, "sau", "h.txt");
+        Assert.True(WaitFor(() => changed.Contains(moved1) && changed.Contains(moved2)),
+            "không nhận được FileChanged cho file trong thư mục chuyển vào");
+    }
+
     [Fact]
     public void Xoa_file_thi_bao_FileDeleted()
     {

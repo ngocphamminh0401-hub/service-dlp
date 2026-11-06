@@ -1,0 +1,34 @@
+<Project>
+  <!--
+    [Thay đổi] Vá riêng cho máy Linux cũ (Ubuntu 18.04, glibc 2.27).
+
+    Vì sao cần: file SQLite có sẵn trong NuGet (libe_sqlite3.so của SQLitePCLRaw) được biên dịch
+    trên Linux mới, đòi glibc 2.34 → máy cũ nạp không được, mọi chỗ dùng Microsoft.Data.Sqlite đều lỗi.
+
+    Cách vá: tự biên dịch SQLite (cùng phiên bản 3.53.3, cùng tuỳ chọn) ngay trên máy này, đặt ở
+    ~/.local/lib/dlp-sqlite/libe_sqlite3.so. Sau mỗi lần build, target dưới đây chép file đó đè lên
+    bản của NuGet trong thư mục output.
+
+    An toàn: chỉ chạy khi đang ở Linux VÀ file tự biên dịch tồn tại. Trên Windows hoặc máy không có
+    file đó, target này không làm gì → build như cũ.
+    Khi máy đã lên Ubuntu 22.04+ thì có thể xoá file này.
+
+    Đổi đường dẫn file (nếu cần): dotnet build -p:DlpSqliteNativeLib=/duong/dan/libe_sqlite3.so
+  -->
+  <PropertyGroup>
+    <DlpSqliteNativeLib Condition="'$(DlpSqliteNativeLib)' == ''">$(HOME)/.local/lib/dlp-sqlite/libe_sqlite3.so</DlpSqliteNativeLib>
+  </PropertyGroup>
+
+  <Target Name="DlpReplaceSqliteNative"
+          AfterTargets="Build"
+          Condition="$([MSBuild]::IsOSPlatform('Linux')) And Exists('$(DlpSqliteNativeLib)')">
+    <!-- Build thường (không chỉ định RID): NuGet đặt file ở runtimes/linux-x64/native/ -->
+    <Copy SourceFiles="$(DlpSqliteNativeLib)"
+          DestinationFolder="$(OutDir)runtimes/linux-x64/native"
+          Condition="Exists('$(OutDir)runtimes/linux-x64/native/libe_sqlite3.so')" />
+    <!-- Build có RID (-r linux-x64): NuGet đặt file ngay ở gốc output -->
+    <Copy SourceFiles="$(DlpSqliteNativeLib)"
+          DestinationFolder="$(OutDir)"
+          Condition="Exists('$(OutDir)libe_sqlite3.so')" />
+  </Target>
+</Project>
