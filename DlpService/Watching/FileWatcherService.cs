@@ -1,6 +1,7 @@
 // [Thay đổi] Thêm namespace theo folder Watching/ và using để dùng FileReaderService (nay nằm ở namespace Reading)
 using DlpService.Classification;
 using DlpService.Pipeline; // [Thay đổi] Tách lõi bước 3: FileProcessor, ProcessOutcome
+using DlpService.Platform; // [Thay đổi] Tách lõi bước 4: IFileChangeSource, IPathPolicy
 using DlpService.Reading;
 using DlpService.Scanning;
 using DlpService.Storage; // [Thay đổi] Ghi finding + scan_result vào SQLite
@@ -35,17 +36,17 @@ public class FileWatcherService : IDisposable
     // [Sửa lỗi] Field này CHỈ đủ khi chính FileWatcherService còn được giữ — trước đây Worker giữ nó bằng biến cục bộ nên vẫn bị thu
     // hồi khi rảnh (xem Worker._fileWatcher). Tham chiếu mạnh phải nối liền từ Worker → FileWatcherService → FileSystemWatcher.
     // [Thay đổi] shared-core: theo dõi NHIỀU thư mục (máy trạm Linux cần Documents, Desktop...) → mỗi thư mục 1 watcher.
-    // Danh sách này vẫn là tham chiếu mạnh nối liền Worker → FileWatcherService → các FileSystemWatcher (xem lưu ý ở trên).
-    private readonly List<FileSystemWatcher> _watchers = [];
+    // [Thay đổi] Tách lõi bước 4: các FileSystemWatcher nằm trong nguồn sự kiện IFileChangeSource (Platform/FileSystemWatcherSource). Tham chiếu mạnh
+    // vẫn nối liền Worker → FileWatcherService → _source → FileSystemWatcher (xem lưu ý [Sửa lỗi] ở trên).
+    private readonly IFileChangeSource _source;
 
-    // [Thay đổi] shared-core: các thư mục gốc đang theo dõi — OnWatcherError biết thư mục nào cần quét bù khi tràn buffer,
-    // Escalate biết tính đường dẫn tương đối theo thư mục gốc nào. Mọi truy cập đều giữ khoá _watchersLock.
+    // [Thay đổi] Tách lõi bước 4: quy tắc đường dẫn theo hệ điều hành (so sánh hoa/thường, file tạm) — thay cho PathComparison tự viết ở đây
+    private readonly IPathPolicy _pathPolicy;
+
+    // [Thay đổi] shared-core: các thư mục gốc đang theo dõi — OnSourceFailed biết thư mục nào cần quét bù khi tràn buffer,
+    // RelativeToWatchRoot biết tính đường dẫn tương đối theo thư mục gốc nào. Mọi truy cập đều giữ khoá _watchersLock.
     private readonly List<string> _watchFolders = [];
     private readonly Lock _watchersLock = new();
-
-    // [Thay đổi] shared-core: so sánh đường dẫn theo hệ điều hành — Windows không phân biệt hoa/thường, Linux có
-    private static readonly StringComparison PathComparison =
-        OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
 
     /// <summary>Tạo watcher với 1 scanner đã có sẵn rule để dùng khi quét file.</summary>
     /// <param name="scanner">Bộ quét regex, đã nạp rule từ trước.</param>
@@ -55,18 +56,28 @@ public class FileWatcherService : IDisposable
     /// <param name="store">[Thay đổi] Ghi scan_result/finding vào SQLite; null = không ghi DB (VD mở DB thất bại).</param>
     /// <param name="escalation">[Thay đổi] Eligibility + phân nhóm P1/P2/P3; null = mặc định.</param>
     /// <param name="maxConcurrency">[Thay đổi] Số file tối đa xử lý cùng lúc (≥ 1); mặc định <see cref="DefaultMaxConcurrency"/>.</param>
+    /// <param name="changeSource">[Thay đổi] Tách lõi bước 4: nguồn sự kiện thay đổi file; null = FileSystemWatcherSource (như trước đây).</param>
+    /// <param name="pathPolicy">[Thay đổi] Tách lõi bước 4: quy tắc đường dẫn; null = CaseInsensitivePathPolicy (hành vi Windows như trước đây —
+    /// nơi gọi cũ đều chạy trên Windows; host của hệ điều hành khác PHẢI truyền chính sách của mình).</param>
     public FileWatcherService(RegexScanner scanner, ClassificationEngine engine, ILogger logger, RouterOptions? routerOptions = null,
         ResultStore? store = null, EscalationOptions? escalation = null, FileConfidenceScorer? fileConfidence = null,
-        int maxConcurrency = DefaultMaxConcurrency)
+        int maxConcurrency = DefaultMaxConcurrency, IFileChangeSource? changeSource = null, IPathPolicy? pathPolicy = null)
     {
         MaxConcurrency = Math.Max(1, maxConcurrency); // [Thay đổi] Giới hạn đồng thời: cấu hình sai (≤ 0) thì vẫn chạy được 1 file
         _gate = new SemaphoreSlim(MaxConcurrency, MaxConcurrency);
-        _fileReader = new FileReaderService();
+        _pathPolicy = pathPolicy ?? new CaseInsensitivePathPolicy();
+        _fileReader = new FileReaderService(_pathPolicy);
         _logger = logger;
         // [Thay đổi] Tách lõi bước 3: các giá trị mặc định (Router ba vùng, eligibility) giữ nguyên như cũ; relativePathOf = hàm tìm thư mục gốc ở dưới
         _processor = new FileProcessor(_fileReader, scanner, engine, logger,
             routerOptions ?? new RouterOptions(), store, escalation ?? new EscalationOptions(), fileConfidence,
-            RelativeToWatchRoot);
+            RelativeToWatchRoot, _pathPolicy);
+
+        // [Thay đổi] Tách lõi bước 4: nghe sự kiện từ nguồn thay cho việc gọi thẳng FileSystemWatcher. FileChanged gộp Created/Changed/Renamed
+        // (đúng như 3 handler cũ cùng gọi ScheduleProcess); FileDeleted chưa xử lý (rủi ro R4 — làm ở giai đoạn Linux).
+        _source = changeSource ?? new FileSystemWatcherSource();
+        _source.FileChanged += ScheduleProcess;
+        _source.Failed += OnSourceFailed;
     }
 
     // [Thay đổi] Giới hạn số file xử lý cùng lúc (Watch:MaxConcurrency). Trước đây mỗi sự kiện file là 1 task chạy ngay → khi burst
@@ -95,7 +106,7 @@ public class FileWatcherService : IDisposable
             foreach (var folder in _watchFolders)
             {
                 string prefix = Path.TrimEndingDirectorySeparator(folder) + Path.DirectorySeparatorChar;
-                if (filePath.StartsWith(prefix, PathComparison) && (root == null || folder.Length > root.Length))
+                if (filePath.StartsWith(prefix, _pathPolicy.Comparison) && (root == null || folder.Length > root.Length))
                 {
                     root = folder;
                 }
@@ -116,37 +127,16 @@ public class FileWatcherService : IDisposable
             return;
         }
 
-        // [Thay đổi] Nhóm D3: lưu lại thư mục và dùng field thay cho biến cục bộ "var watcher"
-        var watcher = new FileSystemWatcher(folderPath)
-        {
-            // [Thay đổi] Mở rộng định dạng: bỏ "Filter = *.txt" cố định — danh sách đuôi lấy từ FileReaderService
-            // (thêm vào Filters ngay dưới), để thêm định dạng mới không phải sửa watcher.
-            // [Thay đổi] Nhóm D2 - mặc định FileSystemWatcher chỉ theo dõi ĐÚNG 1 cấp thư mục, bỏ sót mọi
-            // thư mục con. Bật lên để nhìn xuyên xuống toàn bộ cây thư mục con của watch-folder.
-            IncludeSubdirectories = true,
-            // [Thay đổi] Nhóm D3: tăng buffer từ 8KB (mặc định) lên 64KB (mức tối đa khuyến nghị) để giảm
-            // khả năng tràn khi nhiều file đổi dồn dập. Tăng hơn nữa sẽ tốn bộ nhớ kernel (non-paged pool).
-            InternalBufferSize = 64 * 1024
-        };
-        // [Thay đổi] Mở rộng định dạng: mỗi đuôi hỗ trợ 1 filter ("*.txt", "*.docx", ...)
-        foreach (var extension in _fileReader.SupportedExtensions)
-        {
-            watcher.Filters.Add("*" + extension);
-        }
-        watcher.Created += OnFileChanged;
-        watcher.Changed += OnFileChanged;
-        watcher.Renamed += OnFileRenamed;
-        // [Thay đổi] Nhóm D3: nghe sự kiện Error — nếu không đăng ký, lỗi tràn buffer/mất thư mục trôi đi âm thầm
-        watcher.Error += OnWatcherError;
-
-        // [Thay đổi] shared-core: đăng ký watcher + thư mục vào danh sách TRƯỚC khi bật sự kiện, để Escalate/OnWatcherError
+        // [Thay đổi] shared-core: ghi nhận thư mục vào danh sách TRƯỚC khi bật theo dõi, để RelativeToWatchRoot/OnSourceFailed
         // (chạy trên luồng khác ngay khi có sự kiện) đã thấy thư mục này
         lock (_watchersLock)
         {
-            _watchers.Add(watcher);
             _watchFolders.Add(folderPath);
         }
-        watcher.EnableRaisingEvents = true;
+        // [Thay đổi] Tách lõi bước 4: việc tạo FileSystemWatcher (cây thư mục con, buffer 64KB, filter theo đuôi, các sự kiện) nằm ở
+        // FileSystemWatcherSource.Watch — chuyển nguyên văn từ đây. Danh sách đuôi vẫn lấy từ FileReaderService để thêm định dạng mới
+        // không phải sửa watcher.
+        _source.Watch(folderPath, _fileReader.SupportedExtensions);
         _logger.LogInformation("[FileWatcher] Xử lý tối đa {max} file cùng lúc", MaxConcurrency); // [Thay đổi] Giới hạn đồng thời
 
         // [Thay đổi] Nhóm D1 - FileSystemWatcher chỉ bắt sự kiện XẢY RA SAU khi bắt đầu theo dõi; file đã
@@ -196,32 +186,19 @@ public class FileWatcherService : IDisposable
             folderPath, total, scanned, unchanged, total - scanned - unchanged);
     }
 
-    private void OnFileChanged(object sender, FileSystemEventArgs e)
-    {
-        ScheduleProcess(e.FullPath);
-    }
-
-    // [Thay đổi] Nhiều trình soạn thảo (VD VS Code) "tạo file mới" bằng cách ghi ra file tạm rồi ĐỔI TÊN
-    // thành tên thật — thao tác đó chỉ phát sự kiện Renamed, KHÔNG phát Created lẫn Changed, nên watcher cũ
-    // (chỉ nghe 2 sự kiện đó) bỏ sót hoàn toàn những file tạo theo kiểu này.
-    private void OnFileRenamed(object sender, RenamedEventArgs e)
-    {
-        ScheduleProcess(e.FullPath);
-    }
+    // [Thay đổi] Tách lõi bước 4: OnFileChanged/OnFileRenamed đã bỏ — FileSystemWatcherSource gộp Created/Changed/Renamed thành sự kiện FileChanged
+    // (kể cả trường hợp trình soạn thảo ghi file tạm rồi đổi tên: chỉ có Renamed, vẫn được báo là FileChanged với đường dẫn mới).
 
     // [Thay đổi] Nhóm D3: xử lý lỗi của watcher, chia 2 trường hợp:
     //  - Tràn buffer: watcher VẪN chạy nhưng đã mất 1 số sự kiện -> log cảnh báo rồi quét lại cả thư mục để
     //    bù file bị sót (_lastContentHash sẽ tự bỏ qua file nội dung không đổi, nên không bị log lặp).
     //  - Lỗi khác (thư mục bị xoá, mất quyền, mất mạng...): watcher có thể đã ngừng hẳn -> log lỗi rõ ràng.
     //    Việc tự khởi động lại watcher để dành cho bước sau.
-    private void OnWatcherError(object sender, ErrorEventArgs e)
+    // [Thay đổi] Tách lõi bước 4: nhận (thư mục, đã tràn hàng đợi chưa, ngoại lệ) từ IFileChangeSource thay vì ErrorEventArgs của FileSystemWatcher.
+    // shared-core: chỉ quét bù đúng thư mục bị lỗi (không quét lại thư mục khác)
+    private void OnSourceFailed(string watchFolder, bool overflowed, Exception ex)
     {
-        var ex = e.GetException();
-
-        // [Thay đổi] shared-core: sender chính là watcher bị lỗi → chỉ quét bù đúng thư mục của nó (không quét lại thư mục khác)
-        string watchFolder = (sender as FileSystemWatcher)?.Path ?? string.Empty;
-
-        if (ex is InternalBufferOverflowException)
+        if (overflowed)
         {
             _logger.LogWarning("[FileWatcher] Buffer tràn, có thể đã mất sự kiện — quét lại toàn thư mục {folder}", watchFolder);
 
@@ -321,18 +298,10 @@ public class FileWatcherService : IDisposable
     /// <summary>Dừng theo dõi thư mục và huỷ các lần xử lý đang chờ.</summary>
     public void Dispose()
     {
-        // [Thay đổi] shared-core: tắt TẤT CẢ watcher (mỗi thư mục 1 cái)
-        FileSystemWatcher[] toDispose;
-        lock (_watchersLock)
-        {
-            toDispose = [.. _watchers];
-            _watchers.Clear();
-        }
-        foreach (var watcher in toDispose)
-        {
-            watcher.EnableRaisingEvents = false;
-            watcher.Dispose();
-        }
+        // [Thay đổi] Tách lõi bước 4: nguồn sự kiện tự tắt TẤT CẢ watcher (mỗi thư mục 1 cái); gỡ đăng ký trước để không nhận thêm sự kiện lúc đang dừng
+        _source.FileChanged -= ScheduleProcess;
+        _source.Failed -= OnSourceFailed;
+        _source.Dispose();
 
         foreach (var cts in _pendingTimers.Values)
         {

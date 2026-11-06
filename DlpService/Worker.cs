@@ -13,7 +13,8 @@ namespace DlpService;
 /// <summary>Điểm khởi động luồng nền: nạp rule, tạo scanner và bắt đầu theo dõi thư mục watch-folder.</summary>
 // [Thay đổi] Router ba vùng: nhận thêm IConfiguration (DI tự truyền) để đọc ngưỡng T_high/T_low từ appsettings.json
 // [Thay đổi] Tách lõi bước 1: nhận thêm IAppLayout (DI tự truyền) — mọi thư mục rule/DB/model lấy từ đây thay vì ghép AppContext.BaseDirectory
-public class Worker(ILogger<Worker> logger, IConfiguration configuration, IAppLayout layout) : BackgroundService
+// [Thay đổi] Tách lõi bước 4: + IPathPolicy, IDataFolderGuard (adapter theo hệ điều hành do host đăng ký; DI tự truyền)
+public class Worker(ILogger<Worker> logger, IConfiguration configuration, IAppLayout layout, IPathPolicy pathPolicy, IDataFolderGuard dataFolderGuard) : BackgroundService
 {
     // [Sửa lỗi] Watcher bị GC thu hồi khi service rảnh: trước đây FileWatcherService chỉ là BIẾN CỤC BỘ trong ExecuteAsync và không
     // được dùng sau "await Task.WhenAll" → bản Release không giữ nó trong state machine async; FileSystemWatcher của .NET chỉ tự giữ
@@ -87,7 +88,7 @@ public class Worker(ILogger<Worker> logger, IConfiguration configuration, IAppLa
         ResultStore? store = null;
         try
         {
-            store = new ResultStore(dbPath, logger, quota); // [Thay đổi] truyền logger để cảnh báo ACL/PRAGMA; + hạn ngạch job
+            store = new ResultStore(dbPath, logger, quota, dataFolderGuard); // [Thay đổi] truyền logger để cảnh báo ACL/PRAGMA; + hạn ngạch job
             logger.LogInformation("Ghi kết quả quét vào {dbPath}", dbPath);
         }
         catch (Exception ex)
@@ -146,7 +147,7 @@ public class Worker(ILogger<Worker> logger, IConfiguration configuration, IAppLa
 
         // [Sửa lỗi] Gán vào trường _fileWatcher (không dùng biến cục bộ) — xem giải thích ở khai báo trường
         _fileWatcher = new FileWatcherService(scanner, engine, logger, routerOptions, store, escalation, fileConfidence, // [Thay đổi] + eligibility, + FileConfidence
-            maxConcurrency); // [Thay đổi] + giới hạn đồng thời
+            maxConcurrency, pathPolicy: pathPolicy); // [Thay đổi] + giới hạn đồng thời; Tách lõi bước 4: + quy tắc đường dẫn
         // [Thay đổi] shared-core: thư mục theo dõi đọc từ cấu hình "Watch:Folders" (trước đây hard-code ổ D:). Không có mặc định:
         // thiếu/rỗng → báo LỖI rõ rồi dừng worker, vì chạy mà không theo dõi gì còn tệ hơn (service trông bình thường nhưng không quét).
         var watchFolders = (configuration.GetSection("Watch:Folders").Get<string[]>() ?? [])

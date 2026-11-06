@@ -3,6 +3,7 @@
 // chỉ phần theo dõi thư mục mới phụ thuộc hệ điều hành, còn pipeline này là logic thuần nên tách ra để dùng chung cho mọi nền tảng.
 // QUAN TRỌNG: thân các hàm được DI CHUYỂN NGUYÊN VĂN từ FileWatcherService, không đổi logic (chỉ đổi chỗ gọi Mask và Escalate).
 using DlpService.Classification;
+using DlpService.Platform; // [Thay đổi] Tách lõi bước 4: IPathPolicy
 using DlpService.Reading;
 using DlpService.Scanning;
 using DlpService.Storage; // Ghi finding + scan_result vào SQLite
@@ -37,14 +38,18 @@ public sealed class FileProcessor
     // Đường dẫn của file TÍNH TỪ thư mục đang theo dõi (để xét từ khoá P2). Do FileWatcherService cung cấp vì chỉ nó biết các thư mục gốc.
     private readonly Func<string, string> _relativePathOf;
 
+    // [Thay đổi] Tách lõi bước 4: quy tắc đường dẫn theo hệ điều hành (dùng khi xét đường dẫn loại trừ LLM)
+    private readonly IPathPolicy _pathPolicy;
+
     // Hash nội dung lần quét gần nhất theo từng file: nhận ra nhiều sự kiện watcher rời rạc cùng trỏ tới 1 lần lưu file thực tế.
     // ConcurrentDictionary vì nhiều Task debounce và lượt quét khởi động có thể cùng xử lý.
     private readonly ConcurrentDictionary<string, string> _lastContentHash = new();
 
     public FileProcessor(FileReaderService fileReader, RegexScanner scanner, ClassificationEngine engine, ILogger logger,
         RouterOptions routerOptions, ResultStore? store, EscalationOptions escalation, FileConfidenceScorer? fileConfidence,
-        Func<string, string> relativePathOf)
+        Func<string, string> relativePathOf, IPathPolicy pathPolicy)
     {
+        _pathPolicy = pathPolicy;
         _fileReader = fileReader;
         _scanner = scanner;
         _engine = engine;
@@ -371,7 +376,7 @@ public sealed class FileProcessor
     {
         // [Thay đổi] Tách lõi bước 3: việc tìm thư mục gốc đang theo dõi thuộc FileWatcherService (nó giữ danh sách thư mục), nên nhận qua delegate
         string relative = _relativePathOf(filePath);
-        return EscalationPolicy.Decide(zone, textLength, filePath, relative, hash, _escalation, needsOcr);
+        return EscalationPolicy.Decide(zone, textLength, filePath, relative, hash, _escalation, needsOcr, _pathPolicy); // [Thay đổi] Tách lõi bước 4: + _pathPolicy
     }
 
     // [Thay đổi] Hạn ngạch: log kết quả tạo job (không log gì khi không cần LLM / job đã có)

@@ -6,6 +6,7 @@
 // của worker LLM); tín hiệu P2 theo tiêu đề cột + mật độ chuỗi số (cần extractor giữ cấu trúc cột).
 using System.Globalization;
 using System.Text;
+using DlpService.Platform; // [Thay đổi] Tách lõi bước 4: IPathPolicy
 using DlpService.Text;
 
 namespace DlpService.Classification;
@@ -62,7 +63,7 @@ public static class EscalationPolicy
     /// <param name="needsOcr">[Thay đổi] mục 1.3/4.8: file cần OCR mới đọc được (PDF/ảnh scan) — không biết nội
     /// dung thật sự nên KHÔNG được gửi LLM (gửi cũng vô ích, và không phải "sạch" thật).</param>
     public static EscalationDecision Decide(RouteZone zone, int textLength, string filePath, string relativePath,
-        string fileHash, EscalationOptions options, bool needsOcr = false)
+        string fileHash, EscalationOptions options, bool needsOcr = false, IPathPolicy? pathPolicy = null)
     {
         // [Thay đổi] Tách lõi bước 2: LLM tắt → không bao giờ gửi, xét trước mọi điều kiện khác
         if (!options.Enabled)
@@ -89,7 +90,7 @@ public static class EscalationPolicy
             return new EscalationDecision(null, $"quá ít text ({textLength} < {options.MinTextChars} ký tự)");
         }
 
-        if (IsExcluded(filePath, options.ExcludedPaths))
+        if (IsExcluded(filePath, options.ExcludedPaths, (pathPolicy ?? DefaultPathPolicy).Comparison))
         {
             return new EscalationDecision(null, "đường dẫn loại trừ");
         }
@@ -168,7 +169,11 @@ public static class EscalationPolicy
     }
 
     // So tiền tố theo thư mục: "D:\Data\Tmp" loại "D:\Data\Tmp\a.txt" nhưng KHÔNG loại "D:\Data\Tmp2\a.txt"
-    private static bool IsExcluded(string filePath, IEnumerable<string> excludedPaths)
+    // [Thay đổi] Tách lõi bước 4: cách so sánh đường dẫn do IPathPolicy quyết định (trước đây viết cứng OrdinalIgnoreCase — sai trên Linux, nơi
+    // "/Data/Tmp" và "/data/tmp" là 2 thư mục khác nhau). Không truyền chính sách → giữ hành vi cũ (không phân biệt hoa/thường).
+    private static readonly IPathPolicy DefaultPathPolicy = new CaseInsensitivePathPolicy();
+
+    private static bool IsExcluded(string filePath, IEnumerable<string> excludedPaths, StringComparison comparison)
     {
         string full = Path.GetFullPath(filePath);
         foreach (var excluded in excludedPaths)
@@ -178,7 +183,7 @@ public static class EscalationPolicy
                 continue;
             }
             string folder = Path.TrimEndingDirectorySeparator(Path.GetFullPath(excluded)) + Path.DirectorySeparatorChar;
-            if (full.StartsWith(folder, StringComparison.OrdinalIgnoreCase))
+            if (full.StartsWith(folder, comparison))
             {
                 return true;
             }
