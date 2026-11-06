@@ -14,22 +14,26 @@ namespace DlpService.Diagnostics;
 public static class ExplainCommand
 {
     /// <summary>Chạy "explain &lt;file_id&gt;". Trả mã thoát tiến trình (0 = tìm thấy và in được, 1 = lỗi/không tìm thấy).</summary>
-    public static int Run(string[] args)
+    /// <param name="args">Tham số dòng lệnh ("explain", "&lt;file_id&gt;").</param>
+    /// <param name="layout">[Thay đổi] GĐ2: bố cục thư mục của host (Linux chế độ System: DB ở /var/lib/dlp-service). null = cạnh file chạy như cũ.</param>
+    /// <param name="config">[Thay đổi] GĐ2: cấu hình của host (Linux đọc thêm /etc/dlp-service/appsettings.json). null = appsettings.json cạnh file chạy.</param>
+    public static int Run(string[] args, IAppLayout? layout = null, IConfiguration? config = null)
     {
         if (args.Length < 2 || !long.TryParse(args[1], out long fileId))
         {
-            Console.WriteLine("Cách dùng: DlpService.exe explain <file_id>");
+            // [Thay đổi] GĐ2 bước 2.2e: tên lệnh lấy theo file chạy thật (Windows: DlpService, Linux: dlp-service) thay vì viết cứng "DlpService.exe"
+            Console.WriteLine($"Cách dùng: {AppDomain.CurrentDomain.FriendlyName} explain <file_id>");
             return 1;
         }
 
-        var config = new ConfigurationBuilder()
+        config ??= new ConfigurationBuilder()
             .SetBasePath(AppContext.BaseDirectory)
             .AddJsonFile("appsettings.json", optional: true)
             .Build();
 
         // [Thay đổi] Cùng cách đọc DbPath như Worker.cs, để chẩn đoán đúng DB service thật đang dùng
         // [Thay đổi] Tách lõi bước 1: dùng IAppLayout như Worker để chẩn đoán đúng DB/rule mà service thật dùng
-        IAppLayout layout = new ExecutableAppLayout();
+        layout ??= new ExecutableAppLayout();
         string dbPath = layout.ResolvePath(config["Storage:DbPath"] ?? layout.DefaultDbPath);
 
         if (!File.Exists(dbPath))

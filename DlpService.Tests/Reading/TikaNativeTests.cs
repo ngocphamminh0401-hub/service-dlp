@@ -42,7 +42,7 @@ public class TikaNativeTests
         var reader = new FileReaderService(); // không được ném exception
 
         Assert.False(TikaNativeRuntime.IsAvailable);
-        Assert.False(reader.SupportedExtensions.Contains(".doc"));
+        Assert.DoesNotContain(".doc", reader.SupportedExtensions); // [Thay đổi] GĐ2: sửa cảnh báo xUnit2017
         TikaNativeRuntime.ResetForTests();
     }
 
@@ -63,7 +63,7 @@ public class TikaNativeTests
         TikaNativeRuntime.Configure(new TikaNativeOptions { Enabled = true, DllPath = DummyFile, Sha256 = new string('0', 64) }, NullLogger.Instance);
 
         Assert.False(TikaNativeRuntime.IsAvailable);
-        Assert.False(new FileReaderService().SupportedExtensions.Contains(".rtf"));
+        Assert.DoesNotContain(".rtf", new FileReaderService().SupportedExtensions); // [Thay đổi] GĐ2: sửa cảnh báo xUnit2017
         TikaNativeRuntime.ResetForTests();
     }
 

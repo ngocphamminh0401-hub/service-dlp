@@ -127,14 +127,23 @@ public class Worker(ILogger<Worker> logger, IConfiguration configuration, IAppLa
         FileConfidenceScorer? fileConfidence = null;
         // [Thay đổi] Tách lõi bước 1: như dbPath ở trên, qua IAppLayout
         string confPath = layout.ResolvePath(configuration["FileConfidence:ModelPath"] ?? layout.DefaultConfidenceModelPath);
-        try
+        // [Thay đổi] GĐ2 (R11): công tắc "FileConfidence:Enabled" (mặc định true = như cũ). Bản Linux tắt: chỉ còn MỘT hệ chấm điểm
+        // (S1 + Router) quyết định, không tốn thời gian tính một điểm chỉ để quan sát, và gói cài đặt không cần mang model.
+        if (!configuration.GetValue("FileConfidence:Enabled", true))
         {
-            fileConfidence = new FileConfidenceScorer(FileConfidenceModel.Load(confPath));
-            logger.LogInformation("[Conf] FileConfidence 2 nhánh (shadow) bản {version} từ {path}", fileConfidence.Version, confPath);
+            logger.LogInformation("[Conf] FileConfidence tắt (FileConfidence:Enabled=false): chỉ dùng S1 + Router");
         }
-        catch (Exception ex)
+        else
         {
-            logger.LogWarning("[Conf] Không nạp được model FileConfidence {path}: {error} — bỏ qua tính điểm 2 nhánh", confPath, ex.Message);
+            try
+            {
+                fileConfidence = new FileConfidenceScorer(FileConfidenceModel.Load(confPath));
+                logger.LogInformation("[Conf] FileConfidence 2 nhánh (shadow) bản {version} từ {path}", fileConfidence.Version, confPath);
+            }
+            catch (Exception ex)
+            {
+                logger.LogWarning("[Conf] Không nạp được model FileConfidence {path}: {error} — bỏ qua tính điểm 2 nhánh", confPath, ex.Message);
+            }
         }
 
         // [Thay đổi] Giới hạn đồng thời: đọc "Watch:MaxConcurrency" (thiếu → 6). Sai (< 1) thì dùng mặc định + cảnh báo, không chặn
@@ -151,11 +160,27 @@ public class Worker(ILogger<Worker> logger, IConfiguration configuration, IAppLa
             maxConcurrency, pathPolicy: pathPolicy); // [Thay đổi] + giới hạn đồng thời; Tách lõi bước 4: + quy tắc đường dẫn
         // [Thay đổi] shared-core: thư mục theo dõi đọc từ cấu hình "Watch:Folders" (trước đây hard-code ổ D:). Không có mặc định:
         // thiếu/rỗng → báo LỖI rõ rồi dừng worker, vì chạy mà không theo dõi gì còn tệ hơn (service trông bình thường nhưng không quét).
-        var watchFolders = (configuration.GetSection("Watch:Folders").Get<string[]>() ?? [])
-            .Where(f => !string.IsNullOrWhiteSpace(f))
-            .Select(Path.GetFullPath)
-            .Distinct()
-            .ToList();
+        // [Thay đổi] GĐ2 (R8): mỗi mục có thể là MẪU ("/home/*/Documents") → mở rộng thành các thư mục có thật lúc khởi động
+        var watchFolders = new List<string>();
+        foreach (var entry in (configuration.GetSection("Watch:Folders").Get<string[]>() ?? []).Where(f => !string.IsNullOrWhiteSpace(f)))
+        {
+            if (!WatchFolderPatterns.IsPattern(entry))
+            {
+                watchFolders.Add(Path.GetFullPath(entry));
+                continue;
+            }
+            var expanded = WatchFolderPatterns.Expand(entry);
+            if (expanded.Count == 0)
+            {
+                logger.LogWarning("Mẫu thư mục theo dõi \"{pattern}\" không khớp thư mục nào", entry);
+            }
+            else
+            {
+                logger.LogInformation("Mẫu thư mục theo dõi \"{pattern}\" → {count} thư mục", entry, expanded.Count);
+            }
+            watchFolders.AddRange(expanded);
+        }
+        watchFolders = watchFolders.Distinct().ToList();
         if (watchFolders.Count == 0)
         {
             logger.LogError("Chưa cấu hình \"Watch:Folders\" (danh sách thư mục cần theo dõi) trong appsettings.json — service không có gì để quét");

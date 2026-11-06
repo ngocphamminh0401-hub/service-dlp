@@ -65,3 +65,38 @@ public class WindowsDataFolderGuardTests : DataFolderGuardContractTests
     protected override IDataFolderGuard? Create() =>
         OperatingSystem.IsWindows() ? new WindowsDataFolderGuard() : null;
 }
+
+/// <summary>[Thay đổi] GĐ2 bước 2.2b: adapter Linux (chmod). Trên Windows trả null → các test bỏ qua.</summary>
+public class LinuxDataFolderGuardTests : DataFolderGuardContractTests
+{
+    protected override IDataFolderGuard? Create() =>
+        OperatingSystem.IsWindows() ? null : new DlpService.Platform.Linux.LinuxDataFolderGuard();
+
+    [Fact]
+    public void Thu_muc_0700_noi_dung_co_san_0600_va_thu_muc_con_0700()
+    {
+        if (OperatingSystem.IsWindows()) return;
+
+        string folder = Path.Combine(Path.GetTempPath(), "dlp-guard-mode-" + Guid.NewGuid().ToString("N"));
+        string sub = Path.Combine(folder, "con");
+        Directory.CreateDirectory(sub);
+        string file = Path.Combine(sub, "dlp.db");
+        File.WriteAllText(file, "x");
+        // Mô phỏng DB tạo từ lần chạy trước khi chưa khoá: ai cũng đọc được
+        File.SetUnixFileMode(folder, (UnixFileMode)0b111_101_101); // 0755
+        File.SetUnixFileMode(file, (UnixFileMode)0b110_100_100);   // 0644
+        try
+        {
+            new DlpService.Platform.Linux.LinuxDataFolderGuard().Restrict(folder);
+
+            const UnixFileMode dir700 = UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute;
+            Assert.Equal(dir700, File.GetUnixFileMode(folder));
+            Assert.Equal(dir700, File.GetUnixFileMode(sub));
+            Assert.Equal(UnixFileMode.UserRead | UnixFileMode.UserWrite, File.GetUnixFileMode(file));
+        }
+        finally
+        {
+            Directory.Delete(folder, recursive: true);
+        }
+    }
+}

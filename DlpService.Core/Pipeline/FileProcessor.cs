@@ -195,13 +195,19 @@ public sealed class FileProcessor
             }
             else
             {
-                _logger.LogInformation("[DLP] {filePath}: phát hiện {count} chỗ nhạy cảm", filePath, matches.Count);
-                foreach (var m in matches)
+                // [Thay đổi] GĐ2 (R7): mức Information chỉ ghi TÊN rule + SỐ LẦN khớp (không vị trí, không giá trị dù đã che).
+                // Chi tiết từng chỗ khớp xuống mức Debug — mặc định không bật khi chạy thật.
+                var perRule = matches.GroupBy(m => m.PatternName).OrderBy(g => g.Key, StringComparer.Ordinal).Select(g => $"{g.Key}×{g.Count()}");
+                _logger.LogInformation("[DLP] {filePath}: phát hiện {count} chỗ nhạy cảm: {rules}", filePath, matches.Count, string.Join(", ", perRule));
+                if (_logger.IsEnabled(LogLevel.Debug))
                 {
-                    // [Thay đổi] Bậc 3 #7: thêm điểm tin cậy ("—" nếu rule không khai confidence), để quan sát phân bố
-                    // điểm thật mà chỉnh min_confidence của từng rule
-                    _logger.LogInformation(" - {pattern} tại vị trí {index}: {masked} (tin cậy {confidence})",
-                        m.PatternName, m.Index, LogMasking.Mask(m.Value), m.Confidence?.ToString("0.00") ?? "—");
+                    foreach (var m in matches)
+                    {
+                        // [Thay đổi] Bậc 3 #7: thêm điểm tin cậy ("—" nếu rule không khai confidence), để quan sát phân bố
+                        // điểm thật mà chỉnh min_confidence của từng rule
+                        _logger.LogDebug(" - {pattern} tại vị trí {index}: {masked} (tin cậy {confidence})",
+                            m.PatternName, m.Index, LogMasking.Mask(m.Value), m.Confidence?.ToString("0.00") ?? "—");
+                    }
                 }
                 var context = new ScanContext
                 {

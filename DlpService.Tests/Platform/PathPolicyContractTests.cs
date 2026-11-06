@@ -48,3 +48,43 @@ public class CaseInsensitivePathPolicyTests : PathPolicyContractTests
         Assert.True(Create().IsTemporaryFile(Path.Combine("a", "~$baocao.docx")));
     }
 }
+
+/// <summary>[Thay đổi] GĐ2 bước 2.2a: adapter Linux — phân biệt hoa/thường, bỏ file tạm của các ứng dụng Linux.</summary>
+public class LinuxPathPolicyTests : PathPolicyContractTests
+{
+    protected override IPathPolicy Create() => new DlpService.Platform.Linux.LinuxPathPolicy();
+
+    [Fact]
+    public void So_sanh_phan_biet_hoa_thuong()
+    {
+        Assert.Equal(StringComparison.Ordinal, Create().Comparison);
+        // Linux: /home/a/Docs và /home/a/docs là HAI thư mục khác nhau
+        Assert.False("/home/a/Docs/x.docx".StartsWith("/home/a/docs/", Create().Comparison));
+    }
+
+    [Theory]
+    [InlineData("~$baocao.docx")]          // Office (file đến từ ổ chia sẻ Windows)
+    [InlineData(".~lock.baocao.docx#")]    // LibreOffice
+    [InlineData(".goutputstream-AB12CD")]  // GNOME
+    [InlineData("baocao.txt~")]            // bản sao lưu vim/emacs/gedit
+    [InlineData(".baocao.txt.swp")]        // vim
+    [InlineData("baocao.txt.kate-swp")]    // Kate
+    [InlineData("hopdong.pdf.part")]       // Firefox tải dở
+    [InlineData("Unconfirmed 123.crdownload")] // Chrome tải dở
+    [InlineData("lu1234abcd.tmp")]         // LibreOffice khi lưu
+    [InlineData("HOPDONG.PDF.PART")]       // hậu tố do ứng dụng đặt → không phân biệt hoa/thường
+    public void File_tam_cua_ung_dung_Linux_bi_bo_qua(string name)
+    {
+        Assert.True(Create().IsTemporaryFile(Path.Combine("/home/a", name)));
+    }
+
+    [Theory]
+    [InlineData("baocao.docx")]
+    [InlineData(".bashrc")]            // file ẩn bình thường không phải file tạm (việc bỏ thư mục ẩn thuộc GĐ3)
+    [InlineData("so~tay.txt")]         // có "~" ở giữa tên
+    [InlineData("partner-list.xlsx")]  // có chữ "part" nhưng không phải đuôi ".part"
+    public void File_binh_thuong_khong_bi_bo_qua(string name)
+    {
+        Assert.False(Create().IsTemporaryFile(Path.Combine("/home/a", name)));
+    }
+}

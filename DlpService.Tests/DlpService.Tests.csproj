@@ -20,6 +20,8 @@
 
   <ItemGroup>
     <ProjectReference Include="..\DlpService\DlpService.csproj" />
+    <!-- [Thay đổi] GĐ2 bước 2.2: test hợp đồng cho adapter Linux (LinuxPathPolicy, LinuxDataFolderGuard, LinuxAppLayout, LinuxHost) -->
+    <ProjectReference Include="..\DlpService.Platform.Linux\DlpService.Platform.Linux.csproj" />
   </ItemGroup>
 
 </Project>

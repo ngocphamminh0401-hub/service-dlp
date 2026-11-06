@@ -10,6 +10,10 @@ Cách hoạt động (đi qua ĐÚNG đường chạy thật của service, gồ
   5. Đọc DB, xuất mỗi file 1 dòng, sắp xếp theo đường dẫn, BỎ các cột đổi theo mỗi lần chạy.
   6. Dừng service.
 
+Linux (GĐ2 — so với ảnh Windows đã lưu, LLM tắt):
+           python3 scripts/snapshot-ket-qua.py --out /tmp/linux.tsv
+           git diff --no-index docs/snapshot/baseline-2-llm-tat.tsv /tmp/linux.tsv
+
 So sánh:   py -3 scripts/snapshot-ket-qua.py --out a.tsv   (trước)
            py -3 scripts/snapshot-ket-qua.py --out b.tsv   (sau)
            fc a.tsv b.tsv   (hoặc: git diff --no-index a.tsv b.tsv)
@@ -26,12 +30,22 @@ import tempfile
 import time
 
 # Console Windows mặc định cp1252 → không in được tiếng Việt
-sys.stdout.reconfigure(encoding="utf-8")
-sys.stderr.reconfigure(encoding="utf-8")
+# [Thay đổi] GĐ2: reconfigure chỉ có từ Python 3.7 — Ubuntu 18.04 có 3.6 (console Linux vốn đã UTF-8 nên bỏ qua được)
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8")
+    sys.stderr.reconfigure(encoding="utf-8")
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-DEFAULT_RAWDATA = r"D:\dlp-classifier\rawdata"
-DEFAULT_DLL = os.path.join(REPO, "DlpService", "bin", "Debug", "net10.0", "DlpService.dll")
+# [Thay đổi] GĐ2 bước 2.4: chạy được trên Linux để so kết quả Linux ↔ Windows. Mặc định theo hệ điều hành:
+#   Windows: dữ liệu D:\dlp-classifier\rawdata, host Windows (DlpService.dll)
+#   Linux:   dữ liệu ~/dlp-rawdata (chép nguyên thư mục rawdata sang), host Linux (dlp-service.dll)
+# Đổi bằng --rawdata / --dll, hoặc biến môi trường DLP_RAWDATA.
+if os.name == "nt":
+    DEFAULT_RAWDATA = os.environ.get("DLP_RAWDATA", r"D:\dlp-classifier\rawdata")
+    DEFAULT_DLL = os.path.join(REPO, "DlpService", "bin", "Debug", "net10.0", "DlpService.dll")
+else:
+    DEFAULT_RAWDATA = os.environ.get("DLP_RAWDATA", os.path.expanduser("~/dlp-rawdata"))
+    DEFAULT_DLL = os.path.join(REPO, "DlpService.Host.Linux", "bin", "Debug", "net10.0", "dlp-service.dll")
 EXTENSIONS = (".docx", ".pdf")
 
 
@@ -79,7 +93,7 @@ def main():
     args = ap.parse_args()
 
     if not os.path.isfile(args.dll):
-        sys.exit(f"Chưa build: không thấy {args.dll} (chạy: dotnet build DlpService)")
+        sys.exit(f"Chưa build: không thấy {args.dll} (chạy: dotnet build DlpService.slnx)")
     sample = pick_sample(args.rawdata, args.per_dir)
     if not sample:
         sys.exit("Không chọn được file mẫu nào")

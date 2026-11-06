@@ -5,16 +5,20 @@ namespace DlpService.Pipeline;
 /// <summary>Che giá trị nhạy cảm khi ghi log.</summary>
 public static class LogMasking
 {
-    // [Thay đổi] Hàm phụ mới: che giá trị nhạy cảm trước khi log, ví dụ "012345678901" -> "012******901"
+    // [Thay đổi] GĐ2 (R7): siết cách che. Cách cũ giữ 3 ký tự đầu + 3 cuối → CCCD 12 số lộ 6 số (đầu là mã tỉnh + giới tính + năm sinh,
+    // cuối là số ngẫu nhiên — ghép với tên/ngày sinh trong cùng log là đoán được), tên người lộ 3 chữ đầu ("Ngu***").
+    // Cách mới: chỉ giữ 2 ký tự CUỐI và chỉ khi giá trị đủ dài (> 8); độ dài vẫn giữ để biết đã khớp chuỗi cỡ nào.
+    // Thêm nữa, FileProcessor chỉ ghi dòng chi tiết từng chỗ khớp ở mức Debug (mặc định không bật).
+    private const int MinLengthToShowTail = 9;
+    private const int TailLength = 2;
+
+    /// <summary>Che giá trị: "012345678901" → "**********01"; chuỗi &lt;= 8 ký tự → "***".</summary>
     public static string Mask(string value)
     {
-        // Chuỗi quá ngắn (<= 6 ký tự) thì che hết
-        if (value.Length <= 6)
+        if (value.Length < MinLengthToShowTail)
         {
             return "***";
         }
-
-        // Giữ 3 ký tự đầu và 3 ký tự cuối, phần giữa thay bằng dấu *
-        return value[..3] + new string('*', value.Length - 6) + value[^3..];
+        return new string('*', value.Length - TailLength) + value[^TailLength..];
     }
 }

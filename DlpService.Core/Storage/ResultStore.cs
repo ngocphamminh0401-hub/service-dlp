@@ -329,7 +329,8 @@ public sealed partial class ResultStore : IDisposable
         try
         {
             guard.Restrict(folder);
-            logger?.LogInformation("[DB] Đã khoá quyền thư mục dữ liệu {folder} ({who})", folder, guard.Description);
+            // [Thay đổi] GĐ2 bước 2.2e: câu cũ "Đã khoá quyền ... ((không khoá))" tự mâu thuẫn khi guard là NoOp → câu trung lập, nội dung do guard tự mô tả
+            logger?.LogInformation("[DB] Quyền thư mục dữ liệu {folder}: {who}", folder, guard.Description);
         }
         catch (Exception ex)
         {

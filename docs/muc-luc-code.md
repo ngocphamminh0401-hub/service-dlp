@@ -8,6 +8,7 @@ Cập nhật khi thêm/xoá file, không cần cập nhật khi chỉ sửa logi
 | File | Class | Việc chính |
 |---|---|---|
 | FileWatcherService.cs | FileWatcherService | Theo dõi thư mục (kể cả thư mục con; mọi đuôi `FileReaderService` hỗ trợ) bằng `FileSystemWatcher`, debounce 300ms, giới hạn số file xử lý cùng lúc (`Watch:MaxConcurrency`, mặc định 6, `SemaphoreSlim`), quét file có sẵn khi khởi động, bỏ qua file nội dung không đổi (hash SHA256), quét bù khi buffer tràn (`OnWatcherError`); gọi Reader → Scanner → Engine rồi log kết quả; có rule timeout thì log "CHƯA KẾT LUẬN ĐƯỢC", không gắn mức |
+| WatchFolderPatterns.cs | WatchFolderPatterns | *(GĐ2, R8)* Mở rộng mẫu `Watch:Folders` có `*`/`?` từng cấp (VD `/home/*/Documents`) thành thư mục có thật lúc khởi động; không hỗ trợ `**` |
 
 ## Reading/
 | File | Class | Việc chính |
@@ -122,6 +123,20 @@ Tích hợp Tika native (tika_native.dll biên dịch bằng GraalVM). Cấu hì
 | Worker.cs | Worker | Điểm khởi động luồng nền: nạp rule, tạo scanner + engine, bắt đầu theo dõi thư mục |
 | Program.cs | — | Khởi tạo Generic Host, đăng ký `Worker`, `AddWindowsService()` (chạy dưới SCM), Event Log + File Logger |
 
+## DlpService.Platform.Linux/ *(GĐ2 — adapter Linux, class library)*
+| File | Class | Việc chính |
+|---|---|---|
+| LinuxPathPolicy.cs | LinuxPathPolicy | `IPathPolicy`: so sánh đường dẫn `Ordinal` (phân biệt hoa/thường); bỏ file tạm `~$`, `.~lock.*`, `.goutputstream-*`, `*~`, `.swp/.swo/.swx`, `.kate-swp`, `.part`, `.crdownload`, `.tmp` |
+| LinuxDataFolderGuard.cs | LinuxDataFolderGuard | `IDataFolderGuard`: `File.SetUnixFileMode` — thư mục 0700, thư mục con 0700, file có sẵn 0600 (không theo symlink) |
+| LinuxAppLayout.cs | LinuxAppLayout, LinuxLayoutMode | `IAppLayout` 2 chế độ: **System** (`/etc/dlp-service/rules`, `/var/lib/dlp-service/dlp.db`, `/var/log/dlp-service`) và **Portable** (cạnh file chạy, như Windows) |
+| LinuxHost.cs | LinuxHost | `AddLinuxPlatform()`: `AddSystemd()`, chọn chế độ (`DLP_LAYOUT`, hoặc tự nhận khi chạy từ `/opt/dlp-service`), nạp `/etc/dlp-service/appsettings.json` (thua biến môi trường/dòng lệnh), đăng ký 3 adapter, khoá + mở file log. `BuildExplainConfiguration()` cho lệnh `explain` |
+
+## DlpService.Host.Linux/ *(GĐ2 — host Linux, file chạy `dlp-service`)*
+| File | Class | Việc chính |
+|---|---|---|
+| Program.cs | — | Content root = thư mục file chạy; `AddLinuxPlatform()`; `Worker`; không LLM. Lệnh `dlp-service explain <file_id>` |
+| appsettings.json | — | `Llm:Enabled=false`, `FileConfidence:Enabled=false`, `Watch:MaxConcurrency=2`, `Watch:Folders` trống (truyền khi chạy) |
+
 ## rules/ (dữ liệu, không phải code)
 | Thư mục/File | Nội dung |
 |---|---|
@@ -136,6 +151,8 @@ Tích hợp Tika native (tika_native.dll biên dịch bằng GraalVM). Cấu hì
 |---|---|
 | install-service.ps1 | `sc.exe create` đăng ký service (tự khởi động cùng Windows) + `sc.exe failure` tự restart khi crash |
 | uninstall-service.ps1 | Dừng service + `sc.exe delete` |
+| snapshot-ket-qua.py | Chụp kết quả quét (DB → TSV) để so trước/sau hoặc Linux ↔ Windows; trên Linux mặc định dùng host Linux + `~/dlp-rawdata` |
+| canary-log.py | *(GĐ2, R7)* Chạy host Linux trên file chứa giá trị đánh dấu, kiểm không lộ (nguyên văn / một phần) trong log, console, DB — ở mức Information và Debug |
 
 ## tools/perf/
 | File | Việc chính |

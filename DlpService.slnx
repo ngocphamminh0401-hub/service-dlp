@@ -6,6 +6,8 @@
   <Project Path="DlpService.Core/DlpService.Core.csproj" />
   <Project Path="DlpService/DlpService.csproj" />
   <Project Path="DlpService.Host.Linux/DlpService.Host.Linux.csproj" />
+  <Project Path="DlpService.Platform.Linux/DlpService.Platform.Linux.csproj" />
+  <Project Path="DlpService.Tests/DlpService.Tests.csproj" />
   <Project Path="tools/eval/DlpBaseline/DlpBaseline.csproj" />
   <Project Path="tools/tika-bench/DlpTikaBench/DlpTikaBench.csproj" />
 </Solution>

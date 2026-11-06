@@ -1,4 +1,6 @@
-# Buổi 17 (06/11/2026): Bước 7 tách lõi — build + test trên Linux
+# Buổi 17 (06/11/2026): Bước 7 tách lõi + GĐ2 host Linux tối thiểu
+
+> Báo cáo đầy đủ mọi thay đổi trong ngày: **`docs/bao-cao-thay-doi-2026-11-06.md`**. Mục 1–5 dưới đây là Bước 7; mục 6 là GĐ2.
 
 Máy: Ubuntu 18.04.6, kernel 4.15, glibc 2.27, nhánh `feature/linux` (kéo về tới commit `19c0d82`, Bước 6).
 Kế hoạch: `docs/ke-hoach-tach-loi-dung-chung.md` mục "Bước 7".
@@ -11,7 +13,7 @@ Kế hoạch: `docs/ke-hoach-tach-loi-dung-chung.md` mục "Bước 7".
 | Bước 7 việc 1: test kiến trúc `CoreDependencyTests` (Core không phụ thuộc Windows/LLM) | ✅ Xong |
 | Bước 7 việc 3: xử lý test fail do khác OS — mất sự kiện thư mục con trên Linux | ✅ Xong (phương án A) |
 | `dotnet test DlpService.Tests` | ✅ **148/148** (đầu buổi: 130/143) |
-| Commit | ❌ Chưa — chờ xác nhận |
+| Commit | ✅ `0c63f04` (Bước 7), `5e69690` (GĐ2 2.1), commit cuối ngày (GĐ2 2.2–2.5) |
 
 **Tiêu chí "Đạt" Bước 7:** `dotnet build` + `dotnet test` chạy được trên Linux; mọi fail đều được giải thích → **Đạt**
 (không còn fail). Còn tồn đọng: chưa chạy lại test trên Windows sau thay đổi ở mục 3.
@@ -79,3 +81,17 @@ Chi tiết + so sánh 6 phương án: **`docs/fsw-thu-muc-con-linux.md`**.
 - Cân nhắc thêm `DlpService.Tests` vào `DlpService.slnx`.
 - Tăng `fs.inotify.max_user_watches` (máy này 8192) khi triển khai Linux.
 - Cảnh báo có sẵn `xUnit2017` ở `DlpService.Tests/Reading/TikaNativeTests.cs:45,66` (không thuộc buổi này).
+
+## 6. GĐ2 — host Linux tối thiểu (chi tiết: `docs/bao-cao-thay-doi-2026-11-06.md` mục 4)
+
+| Bước | Nội dung | Trạng thái |
+|---|---|---|
+| 2.1 | `DlpService.Host.Linux` (file chạy `dlp-service`, `AddSystemd`, không LLM) | ✅ |
+| 2.2 | `DlpService.Platform.Linux`: `LinuxPathPolicy` (Ordinal + file tạm Linux), `LinuxDataFolderGuard` (0700/0600), `LinuxAppLayout` (System: /etc, /var/lib, /var/log · Portable), `LinuxHost.AddLinuxPlatform()` | ✅ |
+| 2.2e | Log "đã khoá … (không khoá)", tên lệnh explain, explain theo bố cục host | ✅ |
+| 2.3 | Chạy thật 2 chế độ; **sửa lỗi content root** (dưới systemd sẽ không đọc `appsettings.json`) | ✅ |
+| 2.4 | Đối chiếu Linux ↔ Windows | ⚠️ Chưa — thiếu `rawdata` trên máy; `snapshot-ket-qua.py` đã chạy được trên Linux |
+| 2.5 | R7 che log + `scripts/canary-log.py` (PASS; code cũ 24 FAIL) · R8 mẫu `/home/*/Documents` · R11 `FileConfidence:Enabled` · R12 `needs_review` 5,9 % | ✅ |
+
+Build solution (nay gồm cả test) 0 lỗi / 0 cảnh báo; **189/189** test.
+
