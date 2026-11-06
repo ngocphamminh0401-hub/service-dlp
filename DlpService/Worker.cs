@@ -145,8 +145,25 @@ public class Worker(ILogger<Worker> logger, IConfiguration configuration) : Back
         // [Sửa lỗi] Gán vào trường _fileWatcher (không dùng biến cục bộ) — xem giải thích ở khai báo trường
         _fileWatcher = new FileWatcherService(scanner, engine, logger, routerOptions, store, escalation, fileConfidence, // [Thay đổi] + eligibility, + FileConfidence
             maxConcurrency); // [Thay đổi] + giới hạn đồng thời
-        _fileWatcher.StartWatching(@"D:\Service-DLP\watch-folder");
-        logger.LogInformation("Đang theo dõi thư mục: D:\\Service-DLP\\watch-folder");
+        // [Thay đổi] shared-core: thư mục theo dõi đọc từ cấu hình "Watch:Folders" (trước đây hard-code ổ D:). Không có mặc định:
+        // thiếu/rỗng → báo LỖI rõ rồi dừng worker, vì chạy mà không theo dõi gì còn tệ hơn (service trông bình thường nhưng không quét).
+        var watchFolders = (configuration.GetSection("Watch:Folders").Get<string[]>() ?? [])
+            .Where(f => !string.IsNullOrWhiteSpace(f))
+            .Select(Path.GetFullPath)
+            .Distinct()
+            .ToList();
+        if (watchFolders.Count == 0)
+        {
+            logger.LogError("Chưa cấu hình \"Watch:Folders\" (danh sách thư mục cần theo dõi) trong appsettings.json — service không có gì để quét");
+            _fileWatcher.Dispose();
+            _fileWatcher = null;
+            return;
+        }
+        foreach (var folder in watchFolders)
+        {
+            _fileWatcher.StartWatching(folder);
+            logger.LogInformation("Đang theo dõi thư mục: {folder}", folder);
+        }
 
         // [Thay đổi] Vá lỗi (buổi 11): EnqueueMissingGreyJobs ĐỌC scan_result.file_hash để tạo job bù — PHẢI chạy
         // SAU KHI StartWatching quét xong lượt đầu (ScanExistingFiles chạy đồng bộ bên trong, xong mới return), để
