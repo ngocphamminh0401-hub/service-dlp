@@ -106,8 +106,11 @@ internal static class SampleLoader
 
     // Đường dẫn trong jsonl là đường dẫn LÚC SINH dữ liệu ("data\raw\<thư mục>\<tên file>") -> chỉ giữ tên file,
     // ghép vào thư mục chứa chính file jsonl
+    // [Thay đổi] Đo hiệu năng Linux (10/11/2026): đường dẫn trong jsonl dùng '\' (sinh trên Windows) — trên Linux '\' không phải
+    // dấu phân cách nên Path.GetFileName trả cả chuỗi → không tìm thấy file nào. Đổi '\' thành '/' trước khi lấy tên file
+    // (trên Windows cả hai đều là dấu phân cách nên kết quả không đổi).
     private static string? ResolvePath(string folder, string? rawPath) =>
-        string.IsNullOrWhiteSpace(rawPath) ? null : Path.Combine(folder, Path.GetFileName(rawPath));
+        string.IsNullOrWhiteSpace(rawPath) ? null : Path.Combine(folder, Path.GetFileName(rawPath.Replace('\\', '/')));
 
     private static string? GetString(JsonElement root, string name) =>
         root.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.String ? value.GetString() : null;

@@ -11,7 +11,10 @@ Báo cáo chi tiết từng phần (file này chỉ tổng hợp):
 | Mất sự kiện thư mục con (so sánh 6 phương án) | `docs/fsw-thu-muc-con-linux.md` |
 | GĐ3 | `docs/bao-cao-gd3-watcher-linux.md` |
 | GĐ4 | `docs/bao-cao-gd4-dong-goi-linux.md` |
-| Tóm tắt buổi | `docs/buoi-17-tom-tat.md`, `buoi-18-tom-tat.md`, `buoi-19-tom-tat.md` |
+| Tóm tắt buổi | `docs/buoi-17-tom-tat.md`, `buoi-18-tom-tat.md`, `buoi-19-tom-tat.md`, `buoi-20-tom-tat.md` |
+| [Cập nhật 10/11] Đánh giá Linux ↔ Windows (tổng hợp) | `docs/bao-cao-danh-gia-linux-windows-2026-11-10.md` |
+| [Cập nhật 10/11] Độ chính xác (GĐ2 bước 2.4) | `docs/danh-gia-doi-chieu-linux-windows.md` |
+| [Cập nhật 10/11] Hiệu năng | `docs/danh-gia-hieu-nang-linux-windows.md` |
 
 ## 1. Tóm tắt cho người duyệt
 
@@ -21,8 +24,11 @@ Báo cáo chi tiết từng phần (file này chỉ tổng hợp):
   tự theo dõi lại khi thư mục bị xoá rồi tạo lại; người dùng mới được thêm trong 60 giây. CPU lúc rảnh **0,47 %**.
 - **Không lộ dữ liệu trong log**: kiểm canary bằng service thật ở mức Information và Debug — PASS (cách che cũ: 24 chỗ lộ).
 - **Test**: 143 → **233**, tất cả PASS trên Linux. Build 0 lỗi / 0 cảnh báo.
-- **Chưa xong**: chưa chạy lại test trên **Windows** sau các thay đổi ở Core; chưa so kết quả quét Linux ↔ Windows (thiếu dữ liệu mẫu
-  trên máy Linux); chưa build `.rpm`; chưa quyết định hỗ trợ CentOS 7 (D9).
+- **[Cập nhật 10/11] Kết quả quét Linux giống Windows**: 320/320 file mẫu trùng từng cột; 25.485 file trùng mọi chỉ số (Accuracy 81,6 %,
+  F1 "nhạy cảm" 93,7 %). Hiệu năng mỗi file tốt hơn Windows (10,8 so với 79,6 ms trong service; p95 đầu cuối 331 so với 986 ms ở
+  50 file/giây), 0 mất / 0 trùng / 0 lỗi trên hơn 72.000 lần xử lý — xem `docs/bao-cao-danh-gia-linux-windows-2026-11-10.md`.
+- **Chưa xong**: chưa chạy lại test trên **Windows** sau các thay đổi ở Core; chưa build `.rpm`; chưa quyết định hỗ trợ CentOS 7 (D9).
+  ~~Chưa so kết quả quét Linux ↔ Windows~~ → xong 10/11.
 
 ## 2. Các commit trong ngày
 
@@ -42,7 +48,7 @@ Tổng từ Bước 6 (`19c0d82`): 62 file, +4.685 / −116.
 |---|---|---|
 | Tách lõi Bước 0–6 | (trước hôm nay) | ✅ |
 | **Tách lõi Bước 7** | Core sạch + build/test trên Linux | ✅ Đạt |
-| **GĐ2** | Host Linux tối thiểu | ✅ Đạt, **trừ 2.4** (đối chiếu Linux ↔ Windows — thiếu `rawdata`) |
+| **GĐ2** | Host Linux tối thiểu | ✅ Đạt — [Cập nhật 10/11] 2.4 đối chiếu Linux ↔ Windows: **Đạt** (`docs/danh-gia-doi-chieu-linux-windows.md`) |
 | **GĐ3** | Watcher inotify cho thư mục home | ✅ Đạt, trừ p95 trong đợt dồn (cần quyết định) |
 | **GĐ4** | Đóng gói + systemd | ✅ Đạt trên Ubuntu 18.04 / systemd 237; `.rpm` + systemd 219 chưa thử |
 | GĐ5 | Tika native (tuỳ chọn) | ⏳ |
@@ -76,6 +82,10 @@ Bố cục trên máy cài: chương trình `/opt/dlp-service`, cấu hình + ru
 | `needs_review` khi tắt LLM (320 file mẫu) | 5,9 % | — |
 | Canary log (Information + Debug) | 0 lộ | 0 |
 | Cài thật `.deb` | 34/34 PASS | — |
+| [10/11] Độ chính xác so với Windows (25.485 file) | Trùng mọi chỉ số; 320/320 file trùng từng cột | Giống 100 % |
+| [10/11] Trong service, tuần tự / p95 đầu cuối ở 50 file/giây | 10,8 ms / 331 ms (Windows 79,6 ms / 986 ms) | — |
+| [10/11] Burst 25.485 file (máy ảo 2 vCPU) | 142 file/s (`MaxConcurrency=2`), 246 file/s (`=6`); Windows 75–104 | — |
+| [10/11] Khởi động lại với ~41.000 file | 3,6 s, 0 file quét lại (Windows 19 s) | — |
 
 ## 6. Lỗi đáng chú ý tìm ra trong ngày (đều đã sửa)
 
@@ -110,11 +120,14 @@ Các tính năng chỉ bật bằng cấu hình (loại trừ thư mục, đối
 | 1 | **Chạy toàn bộ test trên Windows** trước khi gộp `main` | Làm trước tiên |
 | 2 | **D9** — hỗ trợ CentOS 7 / Ubuntu 16.04 (cần net6; Core dùng `Lock` .NET 9+) | Nếu không bắt buộc: đổi yêu cầu tối thiểu thành Ubuntu 18.04+ / RHEL 8+ |
 | 3 | Tiêu chí p95 ≤ 2 s có áp cho đợt dồn 10.000 file không | Không: giữ ≤ 2 s cho lúc bình thường + "0 sót, 0 trùng" cho đợt dồn |
-| 4 | GĐ2 bước 2.4: đối chiếu Linux ↔ Windows | Chép `rawdata` sang `~/dlp-rawdata`, chạy `scripts/snapshot-ket-qua.py` |
+| 4 | ~~GĐ2 bước 2.4: đối chiếu Linux ↔ Windows~~ | ✅ Xong 10/11 (`docs/danh-gia-doi-chieu-linux-windows.md`) |
 | 5 | Build + thử `.rpm`; thử unit máy cũ trên systemd 219 | Máy CentOS/RHEL hoặc `sudo apt install rpm` |
 | 6 | Gói build trên máy không có SQLite tự biên dịch sẽ cần glibc ≥ 2.34 | Thêm bước build SQLite vào CI, hoặc build gói trên máy cũ |
 | 7 | Rule họ tên bắt lan sang dòng sau ("Họ tên…" nuốt "Số CCCD") | Xem lại rule (có thể cả bản Windows) |
 | 8 | 6/80 file `top_secret` và 8/80 file `public` rơi vùng xám (R12) | Xem từng file khi có dữ liệu |
+| 9 | [10/11] `Watch:MaxConcurrency` mặc định Linux (D6 = 2) | Giữ 2 (đợt dồn chậm hơn 6 khoảng 1,7 lần, lúc bình thường như nhau); 4 nếu ưu tiên đợt dồn |
+| 10 | [10/11] RAM chưa trả về sau 2 phút rảnh (RSS 170–190 MB) | Đo rảnh 30 phút; nếu vẫn cao thử `DOTNET_GCConserveMemory` trong unit |
+| 11 | [10/11] Mốc E2E Windows còn cũ (trước `MaxConcurrency`) | Chạy lại E2E Windows với `MaxConcurrency=6` khi chạy test Windows |
 
 ## 9. Môi trường dev cần biết
 

@@ -13,6 +13,14 @@ internal static class PowerThrottling
     /// <summary>Tự xin thoát chế độ hạ xung (không cần quyền admin) và in kết quả ra console.</summary>
     public static void Disable()
     {
+        // [Thay đổi] Đo hiệu năng Linux (10/11/2026): EcoQoS chỉ có trên Windows — trên Linux gọi kernel32.dll sẽ ném
+        // DllNotFoundException làm công cụ đo dừng ngay → bỏ qua (Linux không hạ xung tiến trình chạy nền kiểu này)
+        if (!OperatingSystem.IsWindows())
+        {
+            Console.WriteLine("Không phải Windows: bỏ qua bước tắt hạ xung (EcoQoS)");
+            return;
+        }
+
         // ControlMask = loại hạ xung muốn điều khiển (EXECUTION_SPEED | IGNORE_TIMER_RESOLUTION), StateMask = 0 nghĩa là TẮT
         var state = new State { Version = 1, ControlMask = 0x1 | 0x4, StateMask = 0 };
         bool ok = SetProcessInformation(Process.GetCurrentProcess().Handle, 4 /* ProcessPowerThrottling */, ref state, (uint)Marshal.SizeOf<State>());
