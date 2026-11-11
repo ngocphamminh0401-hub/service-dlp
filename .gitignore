@@ -18,3 +18,15 @@ tools/tika-bench/corpus*/
 tools/perf/results/
 tools/tika-native/target/
 tools/tika-native/build*/
+
+# [Thay đổi] Chỉ giữ cục bộ, không đưa lên remote (11/11/2026)
+# DLL Tika native (~100 MB) là sản phẩm build, sinh lại bằng tools/tika-native/stage-native.cmd
+DlpService/native/tika/
+# Kết quả chạy công cụ đo/test và log build
+tools/**/results/
+tools/tika-native/*.log
+# Tài liệu buổi học và hướng dẫn cho AI
+docs/
+CLAUDE.md
+# Cấu hình editor cá nhân
+.vscode/

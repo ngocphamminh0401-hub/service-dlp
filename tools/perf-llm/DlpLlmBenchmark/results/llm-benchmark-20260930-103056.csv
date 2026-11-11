@@ -1,7 +1,0 @@
-﻿id,domain,truth,predicted,status,client_ms,server_latency_ms,generated_tokens,need_review,matched_rule
-fin_conf_00001,finance_banking,Confidential,Public,Timeout,60729,0,0,False,UnknownMatchedRule
-fin_int_00001,finance_banking,Internal,Public,Timeout,60194,0,0,False,UnknownMatchedRule
-fin_pub_00001,finance_banking,Public,Public,Timeout,60287,0,0,False,UnknownMatchedRule
-fin_top_00001,finance_banking,Restricted,Public,Timeout,60102,0,0,False,UnknownMatchedRule
-health_conf_00001,healthcare,Confidential,Restricted,Ok,54070,54062,33,True,SpecialCategory
-health_int_00001,healthcare,Internal,Public,Timeout,62066,0,0,False,UnknownMatchedRule

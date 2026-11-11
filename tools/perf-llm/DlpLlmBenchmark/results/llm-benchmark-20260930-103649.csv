@@ -1,6 +1,0 @@
-﻿id,domain,truth,predicted,status,client_ms,server_latency_ms,generated_tokens,need_review,matched_rule
-fin_conf_00001,finance_banking,Confidential,Confidential,Ok,66088,66039,37,True,PiiBasic
-fin_int_00001,finance_banking,Internal,Confidential,Ok,67780,67776,32,True,PiiBasic
-fin_pub_00001,finance_banking,Public,Internal,Ok,61666,61660,38,False,InternalOps
-fin_top_00001,finance_banking,Restricted,Confidential,Ok,72433,72429,32,True,PiiBasic
-health_conf_00001,healthcare,Confidential,Restricted,Ok,53192,53187,33,True,SpecialCategory
