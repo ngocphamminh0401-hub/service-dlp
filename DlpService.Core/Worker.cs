@@ -15,7 +15,9 @@ namespace DlpService;
 // [Thay đổi] Tách lõi bước 1: nhận thêm IAppLayout (DI tự truyền) — mọi thư mục rule/DB/model lấy từ đây thay vì ghép AppContext.BaseDirectory
 // [Thay đổi] Tách lõi bước 4: + IPathPolicy, IDataFolderGuard (adapter theo hệ điều hành do host đăng ký; DI tự truyền)
 public class Worker(ILogger<Worker> logger, IConfiguration configuration, IAppLayout layout, IPathPolicy pathPolicy, IDataFolderGuard dataFolderGuard,
-    IJobDispatchLoop? dispatchLoop = null, IFileChangeSource? changeSource = null) : BackgroundService // [Thay đổi] Tách lõi bước 5: vòng điều phối job (LLM) do host đăng ký, có thể không có
+    // [Thay đổi] Tách lõi bước 5: vòng điều phối job (LLM) do host đăng ký, có thể không có
+    IJobDispatchLoop? dispatchLoop = null, IFileChangeSource? changeSource = null,
+    IFileChangeToken? changeToken = null) : BackgroundService // [Thay đổi] H2: dấu thay đổi do host đăng ký (Linux); không đăng ký → chỉ size/mtime
 {
     // [Sửa lỗi] Watcher bị GC thu hồi khi service rảnh: trước đây FileWatcherService chỉ là BIẾN CỤC BỘ trong ExecuteAsync và không
     // được dùng sau "await Task.WhenAll" → bản Release không giữ nó trong state machine async; FileSystemWatcher của .NET chỉ tự giữ
@@ -160,7 +162,7 @@ public class Worker(ILogger<Worker> logger, IConfiguration configuration, IAppLa
         var watchOptions = ReadWatchOptions(configuration, pathPolicy);
         _fileWatcher = new FileWatcherService(scanner, engine, logger, routerOptions, store, escalation, fileConfidence, // [Thay đổi] + eligibility, + FileConfidence
             maxConcurrency, changeSource: changeSource, pathPolicy: pathPolicy, // [Thay đổi] + giới hạn đồng thời; Tách lõi bước 4: + quy tắc đường dẫn
-            options: watchOptions); // [Thay đổi] GĐ3: + nguồn sự kiện do host đăng ký (Linux: inotify; không đăng ký → FileSystemWatcher) + tuỳ chọn
+            options: watchOptions, changeToken: changeToken); // [Thay đổi] H2: + dấu thay đổi. GĐ3: + nguồn sự kiện do host đăng ký (Linux: inotify; không đăng ký → FileSystemWatcher) + tuỳ chọn
         if (!watchOptions.Exclusion.IsEmpty)
         {
             logger.LogInformation("[Watch] Bỏ qua thư mục: {hidden}{names}", watchOptions.Exclusion.SkipHidden ? "thư mục ẩn (.*), " : "",

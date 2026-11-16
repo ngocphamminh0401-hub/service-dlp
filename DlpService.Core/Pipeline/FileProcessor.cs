@@ -62,10 +62,15 @@ public sealed class FileProcessor
         }
     }
 
+    // [Thay đổi] H2: dấu thay đổi do hệ điều hành đặt (Linux: dev + inode + ctime) — thêm vào cache tầng 1
+    private readonly IFileChangeToken _changeToken;
+
+    /// <param name="changeToken">[Thay đổi] H2: null = NoOpFileChangeToken (cache tầng 1 chỉ dựa vào size/mtime như trước).</param>
     public FileProcessor(FileReaderService fileReader, RegexScanner scanner, ClassificationEngine engine, ILogger logger,
         RouterOptions routerOptions, ResultStore? store, EscalationOptions escalation, FileConfidenceScorer? fileConfidence,
-        Func<string, string> relativePathOf, IPathPolicy pathPolicy)
+        Func<string, string> relativePathOf, IPathPolicy pathPolicy, IFileChangeToken? changeToken = null)
     {
+        _changeToken = changeToken ?? NoOpFileChangeToken.Instance;
         _pathPolicy = pathPolicy;
         _fileReader = fileReader;
         _scanner = scanner;
@@ -83,7 +88,11 @@ public sealed class FileProcessor
     // luồng sự kiện watcher (qua ProcessAfterDebounceAsync) LẪN ScanExistingFiles (quét khi khởi động, Nhóm D1),
     // tránh viết 2 bản logic dễ lệch nhau.
     // [Thay đổi] Cache file_state: trả ProcessOutcome thay cho void để ScanExistingFiles đếm được số file bỏ qua
-    public ProcessOutcome ProcessFile(string filePath)
+    /// <param name="fromChangeEvent">[Thay đổi] H2: true = gọi từ sự kiện watcher (hệ điều hành vừa báo file được GHI: IN_CLOSE_WRITE /
+    /// IN_MOVED_TO / LastWrite) → bỏ cache tầng 1, luôn đọc + băm, vì size/mtime trùng lúc này không chứng minh được "không đổi" (mtime bị đặt
+    /// lại, hoặc 2 lần ghi cùng size trong cùng 1 nhịp đồng hồ ~4 ms của kernel). Tầng 2 (hash + rules_ver) vẫn chặn quét regex lặp.
+    /// false = quét khởi động / đối soát / quét bù (không có sự kiện, tầng 1 có thêm dấu thay đổi).</param>
+    public ProcessOutcome ProcessFile(string filePath, bool fromChangeEvent = false)
     {
         // [Thay đổi] Đo hiệu năng service thật: bấm giờ từng bước, ghi 1 dòng [Perf] ở cuối mỗi file ĐÃ QUÉT (file bỏ qua
         // nhờ cache không ghi). Mốc thời gian lấy bằng Stopwatch (độ phân giải < 1 µs), không ảnh hưởng luồng xử lý.
@@ -99,15 +108,18 @@ public sealed class FileProcessor
         bool exists = info.Exists;
         long size = exists ? info.Length : 0;
         DateTime mtimeUtc = exists ? info.LastWriteTimeUtc : DateTime.UtcNow;
+        // [Thay đổi] H2: chụp dấu thay đổi CÙNG LÚC với size/mtime (cùng lý do: chụp trước khi đọc)
+        string? token = exists ? _changeToken.Get(filePath) : null;
 
         // [Thay đổi] Cache tầng 1 (kiến trúc mục 2.3 bước 2): size + mtime giống hệt lần trước và lần trước đã kết luận
         // được → bỏ qua, KHÔNG mở file (trích text là bước tốn thời gian nhất)
         var cached = TryGetCached(filePath);
         // [Thay đổi] H1: chỉ dùng lại kết luận khi cùng bộ rule (IsReusableFor) — trước đây chỉ xét HasConclusion
         bool reusable = cached?.IsReusableFor(_scanner.RulesVer) == true;
-        if (exists && reusable && cached!.SameSizeAndMtime(size, mtimeUtc))
+        // [Thay đổi] H2: sự kiện ghi → không dùng tầng 1; còn lại so thêm dấu thay đổi (SameFingerprint thay SameSizeAndMtime)
+        if (exists && reusable && !fromChangeEvent && cached!.SameFingerprint(size, mtimeUtc, token))
         {
-            _logger.LogDebug("[FileWatcher] {filePath}: không đổi (size/mtime), bỏ qua", filePath);
+            _logger.LogDebug("[FileWatcher] {filePath}: không đổi (size/mtime/dấu thay đổi), bỏ qua", filePath);
             return ProcessOutcome.Unchanged;
         }
         if (cached is { HasConclusion: true } && !reusable)
@@ -128,7 +140,8 @@ public sealed class FileProcessor
         if (exists && result.Success)
         {
             var after = new FileInfo(filePath);
-            if (!after.Exists || after.Length != size || after.LastWriteTimeUtc != mtimeUtc)
+            // [Thay đổi] H2: so thêm dấu thay đổi — bắt được file bị THAY (inode mới, VD lưu kiểu ghi file tạm rồi rename) dù size/mtime trùng
+            if (!after.Exists || after.Length != size || after.LastWriteTimeUtc != mtimeUtc || _changeToken.Get(filePath) != token)
             {
                 _logger.LogDebug("[FileWatcher] {filePath}: file thay đổi trong lúc đọc — sẽ xử lý lại", filePath);
                 return ProcessOutcome.ChangedDuringRead;
@@ -147,7 +160,7 @@ public sealed class FileProcessor
             if (reusable && cached!.FileHash == hash)
             {
                 _lastContentHash[filePath] = hash;
-                TryMarkUnchanged(filePath, size, mtimeUtc);
+                TryMarkUnchanged(filePath, size, mtimeUtc, token); // [Thay đổi] H2: + dấu thay đổi
                 _logger.LogDebug("[FileWatcher] {filePath}: nội dung không đổi (file_hash), bỏ qua", filePath);
                 return ProcessOutcome.Unchanged;
             }
@@ -202,7 +215,8 @@ public sealed class FileProcessor
                 // [Thay đổi] Ghi DB: chưa kết luận → provisional, needs_review, s1 = 0, không có nhãn. Vẫn lưu finding của
                 // các chỗ khớp tìm được trước khi dừng (chỉ mã rule + vị trí).
                 classifyMs = Lap(ref lastMark); // [Thay đổi] Đo hiệu năng
-                TrySave(filePath, size, mtimeUtc, hash, 0, ResultStore.StatusProvisional, needsReview: true, labelsJson: null, BuildFindings(matches, null));
+                TrySave(filePath, size, mtimeUtc, hash, 0, ResultStore.StatusProvisional, needsReview: true, labelsJson: null, BuildFindings(matches, null),
+                    changeToken: token); // [Thay đổi] H2
                 saveMs = Lap(ref lastMark); // [Thay đổi] Đo hiệu năng
                 LogPerf();
                 return ProcessOutcome.Scanned;
@@ -231,7 +245,8 @@ public sealed class FileProcessor
 
                 // [Thay đổi] Ghi DB: sạch → final, Public, không có finding (P2/P3 vẫn final — theo regex là sạch)
                 var outcome = TrySave(filePath, size, mtimeUtc, hash, 0, ResultStore.StatusFinal, needsReview: false,
-                    LabelsJson(SensitivityLevel.Public, []), [], llmPriority: (int?)decision.Group, needsOcr: result.NeedsOcr, conf: conf);
+                    LabelsJson(SensitivityLevel.Public, []), [], llmPriority: (int?)decision.Group, needsOcr: result.NeedsOcr, conf: conf,
+                    changeToken: token); // [Thay đổi] H2
                 if (rescanForRules)
                 {
                     TryReapplyLlm(filePath, hash, 0, []); // [Thay đổi] H1
@@ -320,7 +335,8 @@ public sealed class FileProcessor
                     findings,
                     // [Thay đổi] Hàng đợi llm_job: nhóm P1/P2/P3 → tạo job (cùng transaction với scan_result, qua hạn ngạch)
                     llmPriority: (int?)decision.Group,
-                    conf: conf); // [Thay đổi] FileConfidence (shadow)
+                    conf: conf, // [Thay đổi] FileConfidence (shadow)
+                    changeToken: token); // [Thay đổi] H2
                 if (rescanForRules)
                 {
                     TryReapplyLlm(filePath, hash, route.Confidence, findings); // [Thay đổi] H1
@@ -441,11 +457,12 @@ public sealed class FileProcessor
 
     // [Thay đổi] Cache file_state: cập nhật size/mtime khi nội dung không đổi. Lỗi chỉ cảnh báo (hậu quả duy nhất: lần sau
     // tầng 1 không bỏ qua được, phải trích text lại để so hash).
-    private void TryMarkUnchanged(string filePath, long size, DateTime mtimeUtc)
+    // [Thay đổi] H2: + changeToken
+    private void TryMarkUnchanged(string filePath, long size, DateTime mtimeUtc, string? changeToken)
     {
         try
         {
-            _store?.MarkUnchanged(filePath, size, mtimeUtc);
+            _store?.MarkUnchanged(filePath, size, mtimeUtc, changeToken);
         }
         catch (Exception ex)
         {
@@ -460,7 +477,8 @@ public sealed class FileProcessor
     // [Thay đổi] Hạn ngạch: trả kết quả hàng đợi (None nếu không có DB / lỗi DB)
     // [Thay đổi] FileConfidence (shadow): thêm conf (null = không tính được)
     private JobEnqueueOutcome TrySave(string filePath, long size, DateTime mtimeUtc, string hash, double s1, string status, bool needsReview,
-        string? labelsJson, List<FindingRecord> findings, int? llmPriority = null, bool needsOcr = false, FileConfidenceResult? conf = null)
+        string? labelsJson, List<FindingRecord> findings, int? llmPriority = null, bool needsOcr = false, FileConfidenceResult? conf = null,
+        string? changeToken = null) // [Thay đổi] H2: dấu thay đổi chụp trước khi đọc
     {
         if (_store == null)
         {
@@ -474,7 +492,8 @@ public sealed class FileProcessor
             return _store.SaveScan(new ScanRecord(filePath, size, mtimeUtc,
                 hash, s1, status, needsReview, labelsJson, findings, llmPriority, needsOcr,
                 _scanner.RulesVer, MergePolicyVersion.Current,
-                conf?.Confidence, conf?.Branch.ToString())); // [Thay đổi] FileConfidence (shadow)
+                conf?.Confidence, conf?.Branch.ToString(), // [Thay đổi] FileConfidence (shadow)
+                changeToken)); // [Thay đổi] H2
         }
         catch (Exception ex)
         {

@@ -84,10 +84,12 @@ public class FileWatcherService : IDisposable
     /// <param name="pathPolicy">[Thay đổi] Tách lõi bước 4: quy tắc đường dẫn; null = CaseInsensitivePathPolicy (hành vi Windows như trước đây —
     /// nơi gọi cũ đều chạy trên Windows; host của hệ điều hành khác PHẢI truyền chính sách của mình).</param>
     /// <param name="options">[Thay đổi] GĐ3: loại trừ thư mục, đối soát, làm mới mẫu, metric; null = mặc định (hành vi cũ).</param>
+    /// <param name="changeToken">[Thay đổi] H2: dấu thay đổi do hệ điều hành đặt (Linux: dev + inode + ctime) cho cache tầng 1 lúc quét
+    /// khởi động / đối soát; null = không có (chỉ size/mtime như trước).</param>
     public FileWatcherService(RegexScanner scanner, ClassificationEngine engine, ILogger logger, RouterOptions? routerOptions = null,
         ResultStore? store = null, EscalationOptions? escalation = null, FileConfidenceScorer? fileConfidence = null,
         int maxConcurrency = DefaultMaxConcurrency, IFileChangeSource? changeSource = null, IPathPolicy? pathPolicy = null,
-        WatchOptions? options = null)
+        WatchOptions? options = null, IFileChangeToken? changeToken = null)
     {
         MaxConcurrency = Math.Max(1, maxConcurrency); // [Thay đổi] Giới hạn đồng thời: cấu hình sai (≤ 0) thì vẫn chạy được 1 file
         _gate = new SemaphoreSlim(MaxConcurrency, MaxConcurrency);
@@ -99,7 +101,7 @@ public class FileWatcherService : IDisposable
         // [Thay đổi] Tách lõi bước 3: các giá trị mặc định (Router ba vùng, eligibility) giữ nguyên như cũ; relativePathOf = hàm tìm thư mục gốc ở dưới
         _processor = new FileProcessor(_fileReader, scanner, engine, logger,
             routerOptions ?? new RouterOptions(), store, escalation ?? new EscalationOptions(), fileConfidence,
-            RelativeToWatchRoot, _pathPolicy);
+            RelativeToWatchRoot, _pathPolicy, changeToken); // [Thay đổi] H2: + dấu thay đổi
 
         // [Thay đổi] Tách lõi bước 4: nghe sự kiện từ nguồn thay cho việc gọi thẳng FileSystemWatcher. FileChanged gộp Created/Changed/Renamed
         // (đúng như 3 handler cũ cùng gọi ScheduleProcess).
@@ -587,7 +589,8 @@ public class FileWatcherService : IDisposable
                 _latencyMs.Enqueue(Math.Max(0, Stopwatch.GetElapsedTime(eventTimestamp).TotalMilliseconds - DebounceMs));
                 Interlocked.Increment(ref _processedFromEvents);
 
-                var outcome = _processor.ProcessFile(filePath);
+                // [Thay đổi] H2: đến từ sự kiện ghi → bỏ cache tầng 1 (size/mtime trùng không chứng minh "không đổi"), luôn đọc + băm
+                var outcome = _processor.ProcessFile(filePath, fromChangeEvent: true);
                 if (outcome == ProcessOutcome.ChangedDuringRead)
                 {
                     // [Thay đổi] GĐ3 (3.4): đọc trúng lúc đang ghi → hẹn lại sau debounce (ghi xong thường có thêm sự kiện; hẹn lại để chắc)

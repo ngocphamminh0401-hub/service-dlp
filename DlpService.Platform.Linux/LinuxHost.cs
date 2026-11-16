@@ -39,6 +39,11 @@ public static class LinuxHost
         builder.Services.AddSingleton(layout);
         builder.Services.AddSingleton<IAppLayout>(layout);
         builder.Services.AddSingleton<IPathPolicy>(new LinuxPathPolicy());
+        // [Thay đổi] H2: dấu thay đổi dev + inode + ctime (statx) cho cache tầng 1 — người dùng không đặt lại được như mtime
+        if (OperatingSystem.IsLinux())
+        {
+            builder.Services.AddSingleton<IFileChangeToken, LinuxFileChangeToken>();
+        }
 
         IDataFolderGuard guard = OperatingSystem.IsWindows() ? new NoOpDataFolderGuard() : new LinuxDataFolderGuard();
         builder.Services.AddSingleton(guard);

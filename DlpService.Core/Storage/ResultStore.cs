@@ -34,9 +34,10 @@ public sealed record FindingRecord(string RuleId, double Score, bool? ValidatorP
 /// — ở Pass 1 chưa có LLM thì S_final vẫn = S1 (đúng "chính sách" hiện có: không có ý kiến LLM thì giữ nguyên).</param>
 /// <param name="FileConf">[Thay đổi] FileConfidence 2 nhánh (shadow): điểm 0-1; null = không tính (quét chưa trọn / chưa nạp model).</param>
 /// <param name="ConfBranch">[Thay đổi] FileConfidence 2 nhánh: "A" / "B" / "Short"; null khi FileConf null.</param>
+/// <param name="ChangeToken">[Thay đổi] H2: dấu thay đổi (IFileChangeToken) chụp cùng lúc với size/mtime; null = nền tảng không hỗ trợ.</param>
 public sealed record ScanRecord(string Path, long Size, DateTime MtimeUtc, string FileHash, double S1, string Status,
     bool NeedsReview, string? LabelsJson, IReadOnlyList<FindingRecord> Findings, int? LlmPriority = null, bool NeedsOcr = false,
-    string RulesVer = "", string MergePolicyVer = "", double? FileConf = null, string? ConfBranch = null);
+    string RulesVer = "", string MergePolicyVer = "", double? FileConf = null, string? ConfBranch = null, string? ChangeToken = null);
 
 // [Thay đổi] Merger mục 7.4 "Lưu vết": đọc gộp lại đúng 8 trường mục 7.4 yêu cầu, vì chúng đang nằm ở 2 bảng khác
 // nhau (scan_result và llm_result) — phục vụ debug/audit, không dùng trong luồng xử lý chính.
@@ -53,10 +54,18 @@ public sealed record ScanTrace(double S1, double? S2, double SFinal, string Sour
 /// trọn (timeout) thì false → lần sau vẫn phải quét lại, không được dùng lại kết quả.</param>
 /// <param name="RulesVer">[Thay đổi] H1: phiên bản bộ rule đã dùng để ra kết luận lần trước (scan_result.rules_ver; rỗng nếu
 /// chưa có scan_result hoặc DB cũ trước khi có cột này).</param>
-public sealed record FileStateInfo(long Size, long MtimeTicks, string? FileHash, bool HasConclusion, string RulesVer = "")
+/// <param name="ChangeToken">[Thay đổi] H2: dấu thay đổi (IFileChangeToken) lúc quét trước; null = DB cũ / nền tảng không hỗ trợ.</param>
+public sealed record FileStateInfo(long Size, long MtimeTicks, string? FileHash, bool HasConclusion, string RulesVer = "",
+    string? ChangeToken = null)
 {
-    /// <summary>Size và mtime có giống hệt lần quét trước không (tầng 1 của cache, không cần mở file).</summary>
+    /// <summary>Size và mtime có giống hệt lần quét trước không.</summary>
     public bool SameSizeAndMtime(long size, DateTime mtimeUtc) => Size == size && MtimeTicks == ResultStore.ToTicks(mtimeUtc);
+
+    // [Thay đổi] H2: size + mtime do người dùng đặt lại được (touch -r, cp -p, tar x) → thêm dấu thay đổi do HỆ ĐIỀU HÀNH đặt (Linux: ctime +
+    // inode). Nền tảng không có dấu (token hiện tại null) → hành vi cũ. Đã lưu null mà giờ có (DB cũ) → coi là khác: đọc lại 1 lần rồi lưu.
+    /// <summary>Tầng 1 của cache (không cần mở file): size, mtime và dấu thay đổi có giống hệt lần quét trước không.</summary>
+    public bool SameFingerprint(long size, DateTime mtimeUtc, string? changeToken) =>
+        SameSizeAndMtime(size, mtimeUtc) && (changeToken == null || changeToken == ChangeToken);
 
     // [Thay đổi] H1: kết luận cũ chỉ dùng lại được khi nó được tính bằng ĐÚNG bộ rule đang chạy. Trước đây chỉ xét
     // HasConclusion → đổi rule + restart thì file không đổi vẫn giữ nhãn của bộ rule cũ mãi mãi.
@@ -129,7 +138,8 @@ public sealed partial class ResultStore : IDisposable
               size          INTEGER NOT NULL,
               mtime_utc     INTEGER NOT NULL,
               file_hash     TEXT,
-              last_scan_utc INTEGER
+              last_scan_utc INTEGER,
+              change_token  TEXT
             );
             CREATE TABLE IF NOT EXISTS scan_result (
               file_id      INTEGER PRIMARY KEY REFERENCES file_state(file_id),
@@ -254,6 +264,16 @@ public sealed partial class ResultStore : IDisposable
         try
         {
             Execute("ALTER TABLE scan_result ADD COLUMN conf_branch TEXT;");
+        }
+        catch (SqliteException ex) when (ex.Message.Contains("duplicate column", StringComparison.OrdinalIgnoreCase))
+        {
+            // Cột đã có sẵn — không phải lỗi
+        }
+
+        // [Thay đổi] H2: dấu thay đổi của file (IFileChangeToken) cho cache tầng 1. Cho phép NULL: DB cũ / nền tảng không hỗ trợ.
+        try
+        {
+            Execute("ALTER TABLE file_state ADD COLUMN change_token TEXT;");
         }
         catch (SqliteException ex) when (ex.Message.Contains("duplicate column", StringComparison.OrdinalIgnoreCase))
         {
@@ -385,17 +405,19 @@ public sealed partial class ResultStore : IDisposable
                 // 1) file_state: thêm mới hoặc cập nhật theo path, lấy file_id
                 long fileId;
                 using (var cmd = Command(transaction, """
-                    INSERT INTO file_state (path, size, mtime_utc, file_hash, last_scan_utc)
-                    VALUES ($path, $size, $mtime, $hash, $now)
+                    INSERT INTO file_state (path, size, mtime_utc, file_hash, last_scan_utc, change_token)
+                    VALUES ($path, $size, $mtime, $hash, $now, $token)
                     ON CONFLICT(path) DO UPDATE SET
                       size = excluded.size, mtime_utc = excluded.mtime_utc,
-                      file_hash = excluded.file_hash, last_scan_utc = excluded.last_scan_utc
+                      file_hash = excluded.file_hash, last_scan_utc = excluded.last_scan_utc,
+                      change_token = excluded.change_token
                     RETURNING file_id;
                     """))
                 {
                     cmd.Parameters.AddWithValue("$path", record.Path);
                     cmd.Parameters.AddWithValue("$size", record.Size);
                     cmd.Parameters.AddWithValue("$mtime", mtime);
+                    cmd.Parameters.AddWithValue("$token", (object?)record.ChangeToken ?? DBNull.Value); // [Thay đổi] H2
                     cmd.Parameters.AddWithValue("$hash", record.FileHash);
                     cmd.Parameters.AddWithValue("$now", now);
                     fileId = Convert.ToInt64(cmd.ExecuteScalar(), CultureInfo.InvariantCulture);
@@ -502,7 +524,7 @@ public sealed partial class ResultStore : IDisposable
             // LEFT JOIN: có file_state nhưng chưa có scan_result → labels_json NULL → HasConclusion = false
             // [Thay đổi] H1: đọc thêm rules_ver (COALESCE vì LEFT JOIN không có scan_result thì NULL)
             cmd.CommandText = """
-                SELECT f.size, f.mtime_utc, f.file_hash, s.labels_json IS NOT NULL, COALESCE(s.rules_ver, '')
+                SELECT f.size, f.mtime_utc, f.file_hash, s.labels_json IS NOT NULL, COALESCE(s.rules_ver, ''), f.change_token
                 FROM file_state f LEFT JOIN scan_result s ON s.file_id = f.file_id
                 WHERE f.path = $path;
                 """;
@@ -515,7 +537,8 @@ public sealed partial class ResultStore : IDisposable
             }
 
             return new FileStateInfo(reader.GetInt64(0), reader.GetInt64(1),
-                reader.IsDBNull(2) ? null : reader.GetString(2), reader.GetInt64(3) == 1, reader.GetString(4));
+                reader.IsDBNull(2) ? null : reader.GetString(2), reader.GetInt64(3) == 1, reader.GetString(4),
+                reader.IsDBNull(5) ? null : reader.GetString(5)); // [Thay đổi] H2: change_token
         }
     }
 
@@ -596,7 +619,8 @@ public sealed partial class ResultStore : IDisposable
     /// <summary>[Thay đổi] Cache file_state: nội dung (file_hash) không đổi nhưng size/mtime đổi (VD mở file rồi Save lại)
     /// → chỉ cập nhật size/mtime/last_scan_utc để lần sau tầng 1 bỏ qua được luôn. scan_result và finding giữ nguyên.</summary>
     /// <exception cref="SqliteException">Lỗi DB — nơi gọi tự quyết định xử lý.</exception>
-    public void MarkUnchanged(string path, long size, DateTime mtimeUtc)
+    /// <param name="changeToken">[Thay đổi] H2: dấu thay đổi chụp cùng lúc với size/mtime (null = nền tảng không hỗ trợ).</param>
+    public void MarkUnchanged(string path, long size, DateTime mtimeUtc, string? changeToken = null)
     {
         lock (_writeLock)
         {
@@ -606,9 +630,10 @@ public sealed partial class ResultStore : IDisposable
             }
 
             using var cmd = _connection.CreateCommand();
-            cmd.CommandText = "UPDATE file_state SET size = $size, mtime_utc = $mtime, last_scan_utc = $now WHERE path = $path;";
+            cmd.CommandText = "UPDATE file_state SET size = $size, mtime_utc = $mtime, change_token = $token, last_scan_utc = $now WHERE path = $path;";
             cmd.Parameters.AddWithValue("$size", size);
             cmd.Parameters.AddWithValue("$mtime", ToTicks(mtimeUtc));
+            cmd.Parameters.AddWithValue("$token", (object?)changeToken ?? DBNull.Value);
             cmd.Parameters.AddWithValue("$now", DateTimeOffset.UtcNow.ToUnixTimeSeconds());
             cmd.Parameters.AddWithValue("$path", path);
             cmd.ExecuteNonQuery();
