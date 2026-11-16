@@ -103,10 +103,18 @@ public sealed class FileProcessor
         // [Thay đổi] Cache tầng 1 (kiến trúc mục 2.3 bước 2): size + mtime giống hệt lần trước và lần trước đã kết luận
         // được → bỏ qua, KHÔNG mở file (trích text là bước tốn thời gian nhất)
         var cached = TryGetCached(filePath);
-        if (exists && cached is { HasConclusion: true } && cached.SameSizeAndMtime(size, mtimeUtc))
+        // [Thay đổi] H1: chỉ dùng lại kết luận khi cùng bộ rule (IsReusableFor) — trước đây chỉ xét HasConclusion
+        bool reusable = cached?.IsReusableFor(_scanner.RulesVer) == true;
+        if (exists && reusable && cached!.SameSizeAndMtime(size, mtimeUtc))
         {
             _logger.LogDebug("[FileWatcher] {filePath}: không đổi (size/mtime), bỏ qua", filePath);
             return ProcessOutcome.Unchanged;
+        }
+        if (cached is { HasConclusion: true } && !reusable)
+        {
+            // [Thay đổi] H1: chỉ log 8 ký tự đầu của version (mã băm bộ rule, không phải dữ liệu file)
+            _logger.LogDebug("[FileWatcher] {filePath}: bộ rule đã đổi ({old} → {current}), quét lại",
+                filePath, ShortVer(cached.RulesVer), ShortVer(_scanner.RulesVer));
         }
 
         cacheMs = Lap(ref lastMark); // [Thay đổi] Đo hiệu năng: tra cache file_state (đọc DB)
@@ -134,7 +142,9 @@ public sealed class FileProcessor
 
             // [Thay đổi] Cache tầng 2: size/mtime đổi nhưng text trích ra y hệt (VD mở file rồi Save lại, không sửa gì)
             // → không quét lại, chỉ cập nhật size/mtime mới để lần sau tầng 1 bỏ qua được luôn
-            if (cached is { HasConclusion: true } && cached.FileHash == hash)
+            // [Thay đổi] H1: tầng 2 cũng phải cùng bộ rule — nếu không, file chỉ bị "touch" (đổi mtime, giữ nội dung) sau khi đổi
+            // rule vẫn giữ nhãn cũ
+            if (reusable && cached!.FileHash == hash)
             {
                 _lastContentHash[filePath] = hash;
                 TryMarkUnchanged(filePath, size, mtimeUtc);
@@ -151,6 +161,9 @@ public sealed class FileProcessor
                 return ProcessOutcome.Unchanged;
             }
             _lastContentHash[filePath] = hash;
+
+            // [Thay đổi] H1: quét lại CÙNG nội dung chỉ vì bộ rule đổi → sau khi lưu phải merge lại verdict LLM cũ (nếu có)
+            bool rescanForRules = cached is { HasConclusion: true } && !reusable && cached.FileHash == hash;
 
             // [Thay đổi] Mở rộng định dạng: đọc được nhưng chưa trọn vẹn (bị cắt vì quá dài, PDF scan không có text)
             // — ghi cảnh báo để biết kết quả quét có thể thiếu. Đặt SAU kiểm tra hash để không lặp cảnh báo.
@@ -219,6 +232,10 @@ public sealed class FileProcessor
                 // [Thay đổi] Ghi DB: sạch → final, Public, không có finding (P2/P3 vẫn final — theo regex là sạch)
                 var outcome = TrySave(filePath, size, mtimeUtc, hash, 0, ResultStore.StatusFinal, needsReview: false,
                     LabelsJson(SensitivityLevel.Public, []), [], llmPriority: (int?)decision.Group, needsOcr: result.NeedsOcr, conf: conf);
+                if (rescanForRules)
+                {
+                    TryReapplyLlm(filePath, hash, 0, []); // [Thay đổi] H1
+                }
                 saveMs = Lap(ref lastMark); // [Thay đổi] Đo hiệu năng
                 LogJobOutcome(filePath, decision, outcome);
             }
@@ -295,14 +312,19 @@ public sealed class FileProcessor
 
                 // [Thay đổi] Ghi DB: vùng xám (đủ điều kiện) → provisional + needs_review (chờ LLM); còn lại → final. s1 = độ tin
                 // cậy của mức.
+                var findings = BuildFindings(matches, s1); // [Thay đổi] H1: giữ biến để dùng lại khi merge lại LLM
                 var outcome = TrySave(filePath, size, mtimeUtc, hash, route.Confidence,
                     waitsForLlm ? ResultStore.StatusProvisional : ResultStore.StatusFinal,
                     needsReview: route.NeedsLlm,
                     LabelsJson(level, results.Select(r => r.Domain)),
-                    BuildFindings(matches, s1),
+                    findings,
                     // [Thay đổi] Hàng đợi llm_job: nhóm P1/P2/P3 → tạo job (cùng transaction với scan_result, qua hạn ngạch)
                     llmPriority: (int?)decision.Group,
                     conf: conf); // [Thay đổi] FileConfidence (shadow)
+                if (rescanForRules)
+                {
+                    TryReapplyLlm(filePath, hash, route.Confidence, findings); // [Thay đổi] H1
+                }
                 saveMs = Lap(ref lastMark); // [Thay đổi] Đo hiệu năng
                 LogJobOutcome(filePath, decision, outcome);
             }
@@ -359,6 +381,62 @@ public sealed class FileProcessor
             _logger.LogWarning("[DB] Không đọc được cache {filePath}: {error}", filePath, ex.Message);
             return null;
         }
+    }
+
+    // [Thay đổi] H1: 8 ký tự đầu của rules_ver để log (đủ phân biệt, đỡ dài dòng)
+    private static string ShortVer(string ver) => string.IsNullOrEmpty(ver) ? "(trống)" : ver[..Math.Min(8, ver.Length)];
+
+    // [Thay đổi] H1: file quét lại CÙNG nội dung vì bộ rule đổi → SaveScan vừa đặt s_final = s1, source = regex. Nếu nội
+    // dung này đã có verdict LLM (job done), merge lại verdict đó với S1 + finding MỚI (giống LlmJobDispatcher) rồi ghi đè,
+    // để không mất kết quả LLM và không kẹt "provisional". Lỗi bất kỳ chỉ cảnh báo — giữ kết quả regex vừa lưu.
+    private void TryReapplyLlm(string filePath, string hash, double s1, List<FindingRecord> findings)
+    {
+        if (_store == null)
+        {
+            return;
+        }
+
+        try
+        {
+            string? json = _store.TryGetDoneLlmJsonForFile(filePath, hash);
+            if (json == null)
+            {
+                return;
+            }
+
+            var merge = Merger.MergeFile(s1, findings, ParseVerdicts(json), _scanner.PolicyOf);
+            if (_store.ApplyMerge(filePath, hash, new ScanMergeUpdate(merge.SFinal, merge.NeedsReview, merge.Source, MergePolicyVersion.Current)))
+            {
+                _logger.LogInformation("[LLM] {filePath}: merge lại verdict LLM cũ sau khi bộ rule đổi — source {source}, S_final {sFinal:0.00}",
+                    filePath, merge.Source, merge.SFinal);
+            }
+        }
+        catch (Exception ex)
+        {
+            // Chỉ log thông báo lỗi (JSON hỏng / lỗi SQLite), không log nội dung json_out
+            _logger.LogWarning("[LLM] {filePath}: không merge lại được verdict LLM cũ, giữ kết quả regex: {error}", filePath, ex.Message);
+        }
+    }
+
+    // [Thay đổi] H1: đọc verdicts từ llm_result.json_out — đúng định dạng LlmJobDispatcher ghi:
+    // {"labels":[...], "verdicts":[{"rule_id":..., "true_positive":..., "confidence":...}]}. Thiếu "verdicts" → rỗng.
+    private static List<RuleVerdict> ParseVerdicts(string json)
+    {
+        var verdicts = new List<RuleVerdict>();
+        using var doc = JsonDocument.Parse(json);
+        if (!doc.RootElement.TryGetProperty("verdicts", out var arr) || arr.ValueKind != JsonValueKind.Array)
+        {
+            return verdicts;
+        }
+
+        foreach (var v in arr.EnumerateArray())
+        {
+            string ruleId = v.TryGetProperty("rule_id", out var r) && r.ValueKind == JsonValueKind.String ? r.GetString()! : "";
+            bool truePositive = v.TryGetProperty("true_positive", out var t) && t.ValueKind == JsonValueKind.True;
+            double confidence = v.TryGetProperty("confidence", out var c) && c.ValueKind == JsonValueKind.Number ? c.GetDouble() : 0;
+            verdicts.Add(new RuleVerdict(ruleId, truePositive, confidence));
+        }
+        return verdicts;
     }
 
     // [Thay đổi] Cache file_state: cập nhật size/mtime khi nội dung không đổi. Lỗi chỉ cảnh báo (hậu quả duy nhất: lần sau

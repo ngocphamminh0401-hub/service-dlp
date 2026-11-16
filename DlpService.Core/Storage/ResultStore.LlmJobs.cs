@@ -203,19 +203,8 @@ public sealed partial class ResultStore
         // merge của nội dung CŨ).
         if (merge != null)
         {
-            using var cmd = Command(tx, """
-                UPDATE scan_result SET s_final = $sfinal, source = $source, needs_review = $review,
-                  merge_policy_ver = $mergever, updated_utc = $now
-                WHERE file_id = $id AND file_hash = $hash;
-                """);
-            cmd.Parameters.AddWithValue("$sfinal", merge.SFinal);
-            cmd.Parameters.AddWithValue("$source", merge.Source);
-            cmd.Parameters.AddWithValue("$review", merge.NeedsReview ? 1 : 0);
-            cmd.Parameters.AddWithValue("$mergever", merge.MergePolicyVer);
-            cmd.Parameters.AddWithValue("$now", now);
-            cmd.Parameters.AddWithValue("$id", fileId);
-            cmd.Parameters.AddWithValue("$hash", fileHash ?? "");
-            cmd.ExecuteNonQuery();
+            // [Thay đổi] H1: câu UPDATE tách ra UpdateScanMerge để ApplyMerge (merge lại khi quét lại do rule đổi) dùng chung
+            UpdateScanMerge(tx, fileId, fileHash ?? "", merge, now, newStatus: null);
         }
 
         // [Thay đổi] llm_cache (tầng 2): cùng transaction → không bao giờ có job done mà thiếu cache hoặc ngược lại
@@ -558,6 +547,54 @@ public sealed partial class ResultStore
             MarkScanFinalAfterJobFailed(tx, jobId, now);
         }
         return moved;
+    }
+
+    // [Thay đổi] H1: rule đổi → file nội dung KHÔNG đổi bị quét lại → SaveScan ghi đè s_final = s1, source = regex, và
+    // SyncLlmJob thấy job done cùng file_hash nên coi là trùng, không tạo job mới → kết quả LLM đã merge bị mất, còn file
+    // vùng xám thì kẹt "provisional" (không còn job nào chốt). Hàm này áp lại kết quả merge (FileProcessor tính từ verdict
+    // LLM cũ + S1/finding mới) và chốt final — chỉ khi scan_result vẫn đúng file_hash này.
+    /// <summary>Ghi kết quả merge lại (S_final/source/needs_review) vào scan_result của file và chốt status = final.</summary>
+    /// <returns>false nếu không có scan_result khớp path + file_hash (file vừa được quét bản mới hơn) hoặc DB đã đóng.</returns>
+    public bool ApplyMerge(string path, string fileHash, ScanMergeUpdate merge) => InJobTransaction((tx, now) =>
+    {
+        long fileId;
+        using (var cmd = Command(tx, "SELECT file_id FROM file_state WHERE path = $path;"))
+        {
+            cmd.Parameters.AddWithValue("$path", path);
+            if (cmd.ExecuteScalar() is not long id)
+            {
+                return false;
+            }
+            fileId = id;
+        }
+
+        if (UpdateScanMerge(tx, fileId, fileHash, merge, now, newStatus: StatusFinal) == 0)
+        {
+            return false;
+        }
+
+        Audit(tx, now, "scan_remerged", null, $"file_id={fileId}, source={merge.Source}, merge lại verdict LLM cũ sau khi rule đổi");
+        return true;
+    }, false);
+
+    // [Thay đổi] H1: dùng chung cho CompleteJob và ApplyMerge. newStatus = null → giữ nguyên status. Trả số dòng đã sửa
+    // (0 = scan_result không còn đúng file_hash → không ghi đè bằng kết quả của nội dung cũ).
+    private int UpdateScanMerge(SqliteTransaction tx, long fileId, string fileHash, ScanMergeUpdate merge, long now, string? newStatus)
+    {
+        using var cmd = Command(tx, """
+            UPDATE scan_result SET s_final = $sfinal, source = $source, needs_review = $review,
+              merge_policy_ver = $mergever, status = COALESCE($status, status), updated_utc = $now
+            WHERE file_id = $id AND file_hash = $hash;
+            """);
+        cmd.Parameters.AddWithValue("$sfinal", merge.SFinal);
+        cmd.Parameters.AddWithValue("$source", merge.Source);
+        cmd.Parameters.AddWithValue("$review", merge.NeedsReview ? 1 : 0);
+        cmd.Parameters.AddWithValue("$mergever", merge.MergePolicyVer);
+        cmd.Parameters.AddWithValue("$status", (object?)newStatus ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("$now", now);
+        cmd.Parameters.AddWithValue("$id", fileId);
+        cmd.Parameters.AddWithValue("$hash", fileHash);
+        return cmd.ExecuteNonQuery();
     }
 
     // [Thay đổi] Mục 7.2: chốt scan_result.status='final' cho ĐÚNG (file_id, file_hash) của job vừa failed hẳn — dùng

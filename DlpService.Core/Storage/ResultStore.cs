@@ -51,10 +51,17 @@ public sealed record ScanTrace(double S1, double? S2, double SFinal, string Sour
 /// <param name="FileHash">SHA-256 của text đã trích lúc quét trước.</param>
 /// <param name="HasConclusion">true nếu lần trước đã kết luận được (có scan_result và labels_json khác NULL). Quét chưa
 /// trọn (timeout) thì false → lần sau vẫn phải quét lại, không được dùng lại kết quả.</param>
-public sealed record FileStateInfo(long Size, long MtimeTicks, string? FileHash, bool HasConclusion)
+/// <param name="RulesVer">[Thay đổi] H1: phiên bản bộ rule đã dùng để ra kết luận lần trước (scan_result.rules_ver; rỗng nếu
+/// chưa có scan_result hoặc DB cũ trước khi có cột này).</param>
+public sealed record FileStateInfo(long Size, long MtimeTicks, string? FileHash, bool HasConclusion, string RulesVer = "")
 {
     /// <summary>Size và mtime có giống hệt lần quét trước không (tầng 1 của cache, không cần mở file).</summary>
     public bool SameSizeAndMtime(long size, DateTime mtimeUtc) => Size == size && MtimeTicks == ResultStore.ToTicks(mtimeUtc);
+
+    // [Thay đổi] H1: kết luận cũ chỉ dùng lại được khi nó được tính bằng ĐÚNG bộ rule đang chạy. Trước đây chỉ xét
+    // HasConclusion → đổi rule + restart thì file không đổi vẫn giữ nhãn của bộ rule cũ mãi mãi.
+    /// <summary>Kết luận lần trước dùng lại được cho bộ rule <paramref name="rulesVer"/> không (đã kết luận + cùng rules_ver).</summary>
+    public bool IsReusableFor(string rulesVer) => HasConclusion && RulesVer == rulesVer;
 }
 
 /// <summary>Kho kết quả quét trên SQLite. An toàn khi nhiều luồng cùng gọi (dùng chung 1 kết nối, có khoá).</summary>
@@ -493,8 +500,9 @@ public sealed partial class ResultStore : IDisposable
 
             using var cmd = _readConnection.CreateCommand();
             // LEFT JOIN: có file_state nhưng chưa có scan_result → labels_json NULL → HasConclusion = false
+            // [Thay đổi] H1: đọc thêm rules_ver (COALESCE vì LEFT JOIN không có scan_result thì NULL)
             cmd.CommandText = """
-                SELECT f.size, f.mtime_utc, f.file_hash, s.labels_json IS NOT NULL
+                SELECT f.size, f.mtime_utc, f.file_hash, s.labels_json IS NOT NULL, COALESCE(s.rules_ver, '')
                 FROM file_state f LEFT JOIN scan_result s ON s.file_id = f.file_id
                 WHERE f.path = $path;
                 """;
@@ -507,7 +515,7 @@ public sealed partial class ResultStore : IDisposable
             }
 
             return new FileStateInfo(reader.GetInt64(0), reader.GetInt64(1),
-                reader.IsDBNull(2) ? null : reader.GetString(2), reader.GetInt64(3) == 1);
+                reader.IsDBNull(2) ? null : reader.GetString(2), reader.GetInt64(3) == 1, reader.GetString(4));
         }
     }
 

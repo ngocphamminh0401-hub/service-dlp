@@ -53,6 +53,26 @@ public sealed partial class ResultStore
             reader.IsDBNull(5) ? null : reader.GetInt32(5));
     }, null);
 
+    // [Thay đổi] H1: dùng khi file được quét lại vì rule đổi (nội dung không đổi) — lấy verdict LLM đã có của ĐÚNG file + ĐÚNG
+    // nội dung để merge lại với S1/finding mới (xem ResultStore.ApplyMerge). Không lọc theo model/prompt: đây là kết quả đã
+    // từng được dùng cho file này, chỉ áp lại chứ không coi là cache cho lần gọi LLM mới.
+    /// <summary>json_out của job LLM ĐÃ DONE mới nhất cho file <paramref name="path"/> với nội dung <paramref name="fileHash"/>.</summary>
+    /// <returns>null nếu chưa có (hoặc DB đã đóng).</returns>
+    public string? TryGetDoneLlmJsonForFile(string path, string fileHash) => InJobTransaction((tx, _) =>
+    {
+        using var cmd = Command(tx, """
+            SELECT r.json_out
+            FROM file_state f
+              JOIN llm_job j ON j.file_id = f.file_id
+              JOIN llm_result r ON r.job_id = j.job_id
+            WHERE f.path = $path AND j.file_hash = $hash AND j.status = 'done'
+            ORDER BY r.created_utc DESC LIMIT 1;
+            """);
+        cmd.Parameters.AddWithValue("$path", path);
+        cmd.Parameters.AddWithValue("$hash", fileHash);
+        return cmd.ExecuteScalar() as string;
+    }, null);
+
     /// <summary>Xoá mục llm_cache cũ hơn <paramref name="olderThan"/> (tính theo lần ghi gần nhất). Cache không có khoá ngoại
     /// tới bảng nào nên xoá không ảnh hưởng dữ liệu khác; mất cache chỉ làm lần sau phải gọi LLM lại.</summary>
     /// <returns>Số mục đã xoá.</returns>
