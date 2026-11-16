@@ -65,7 +65,9 @@ internal sealed record BinaryScore(int Tp, int Fp, int Fn, int Tn)
 /// <summary>Ma trận nhầm lẫn 4 mức: Counts[mức thật, mức dự đoán].</summary>
 internal sealed class ConfusionMatrix
 {
-    public static readonly SensitivityLevel[] Levels = Enum.GetValues<SensitivityLevel>();
+    // [Thay đổi] H3: bỏ Unknown (= -1, chỉ FileProcessor tạo cho file đọc chưa hết; bộ đánh giá không có nhãn này). Ma trận dưới đây đánh
+    // chỉ số bằng (int)level → phải giữ đúng 4 mức Public(0)..Restricted(3), nếu không nhãn hàng/cột sẽ lệch 1 ô.
+    public static readonly SensitivityLevel[] Levels = Enum.GetValues<SensitivityLevel>().Where(l => l != SensitivityLevel.Unknown).ToArray();
 
     public int[,] Counts { get; } = new int[Levels.Length, Levels.Length];
 

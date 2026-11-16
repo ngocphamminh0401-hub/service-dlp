@@ -1,8 +1,13 @@
 namespace DlpService.Classification;
 
-/// <summary>4 mức độ nhạy cảm của 1 file, tăng dần từ Public đến Restricted.</summary>
+/// <summary>4 mức độ nhạy cảm của 1 file, tăng dần từ Public đến Restricted (+ Unknown: chưa đủ căn cứ kết luận).</summary>
 public enum SensitivityLevel
 {
+    // [Thay đổi] H3: file chỉ đọc được một phần (bị cắt / cần OCR / trang scan) và phần đã đọc không có match → KHÔNG được gọi là Public.
+    // Giá trị TƯỜNG MINH -1 (không để tự đánh số): code so sánh mức bằng số (>= Internal, Max(...), ép (int) trong tools/eval). Đặt -1 thì
+    // Unknown < Public → không bao giờ thắng Max, không vượt ngưỡng nào; Public vẫn = 0 = giá trị mặc định của enum như trước.
+    // Chỉ FileProcessor tạo ra mức này; ParseSensitivityLevel KHÔNG trả Unknown (rule ghi mức lạ vẫn coi là Public như cũ).
+    Unknown = -1,
     Public,
     Internal,
     Confidential,

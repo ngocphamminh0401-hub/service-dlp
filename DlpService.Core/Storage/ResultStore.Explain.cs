@@ -12,7 +12,8 @@ public sealed record ExplainRecord(
     string RulesVer, string MergePolicyVer,
     IReadOnlyList<FindingRecord> Findings,
     string? JobId, string? JobStatus, int? JobAttempts, int? JobPriority,
-    string? ModelVer, string? PromptVer, double? S2, double? Confidence, int? LatencyMs, string? JsonOut);
+    string? ModelVer, string? PromptVer, double? S2, double? Confidence, int? LatencyMs, string? JsonOut,
+    string? IncompleteReason = null); // [Thay đổi] H3
 
 public sealed partial class ResultStore
 {
@@ -32,12 +33,14 @@ public sealed partial class ResultStore
             long size, mtimeTicks;
             double s1, sFinal;
             bool needsReview, needsOcr;
+            string? incompleteReason; // [Thay đổi] H3
 
             using (var cmd = _connection.CreateCommand())
             {
                 cmd.CommandText = """
                     SELECT f.path, f.size, f.mtime_utc, f.file_hash,
-                           s.s1, s.s_final, s.status, s.source, s.needs_review, s.needs_ocr, s.rules_ver, s.merge_policy_ver
+                           s.s1, s.s_final, s.status, s.source, s.needs_review, s.needs_ocr, s.rules_ver, s.merge_policy_ver,
+                           s.incomplete_reason
                     FROM file_state f JOIN scan_result s ON s.file_id = f.file_id
                     WHERE f.file_id = $id;
                     """;
@@ -61,6 +64,7 @@ public sealed partial class ResultStore
                 needsOcr = reader.GetInt64(9) == 1;
                 rulesVer = reader.GetString(10);
                 mergePolicyVer = reader.GetString(11);
+                incompleteReason = reader.IsDBNull(12) ? null : reader.GetString(12);
             }
 
             var findings = new List<FindingRecord>();
@@ -121,7 +125,7 @@ public sealed partial class ResultStore
 
             return new ExplainRecord(fileId, path, size, new DateTime(mtimeTicks, DateTimeKind.Utc), fileHash,
                 s1, sFinal, status, source, needsReview, needsOcr, rulesVer, mergePolicyVer, findings,
-                jobId, jobStatus, jobAttempts, jobPriority, modelVer, promptVer, s2, confidence, latencyMs, jsonOut);
+                jobId, jobStatus, jobAttempts, jobPriority, modelVer, promptVer, s2, confidence, latencyMs, jsonOut, incompleteReason);
         }
     }
 }

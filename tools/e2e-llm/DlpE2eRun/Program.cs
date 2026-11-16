@@ -368,7 +368,7 @@ internal static class Program
         var matches = scan.Matches;
         if (matches.Count == 0)
         {
-            var d0 = EscalationPolicy.Decide(RouteZone.NoMatch, content.Length, sample.DocPath, Path.GetFileName(sample.DocPath), hash, escalation, read.NeedsOcr);
+            var d0 = EscalationPolicy.Decide(RouteZone.NoMatch, content.Length, sample.DocPath, Path.GetFileName(sample.DocPath), hash, escalation, read.IncompleteReason); // [Thay đổi] H3: bool NeedsOcr → lý do đọc chưa hết
             return new Candidate(sample, RouteZone.NoMatch, ClsLevel.Public, 0, d0.Group, content.Length);
         }
         var level = engine.Classify(new ScanContext { FilePath = sample.DocPath, Content = content, Matches = matches }).Level;

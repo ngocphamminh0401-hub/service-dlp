@@ -90,7 +90,8 @@ public sealed class LlmJobDispatcher(
         string flatTextBefore;
         try
         {
-            blocks = extractor.Extract(job.Path).ToList();
+            // [Thay đổi] H3: bỏ khối Unreadable (trang scan) — FileReaderService không nối khối này khi băm, ở đây cũng phải bỏ để hash khớp
+            blocks = extractor.Extract(job.Path).Where(b => b.Kind != BlockKind.Unreadable).ToList();
             // [Thay đổi] Vá lỗi (buổi 11): FileWatcherService (Pass 1) chuẩn hoá NFC trước khi băm (Normalizer.ToNfc) —
             // thiếu bước này ở đây làm hash LUÔN lệch với mọi file tiếng Việt (dấu tổ hợp rời khác NFC), khiến job bị
             // đánh dấu "stale" sai dù nội dung không đổi (đã tái hiện thật: 100% job thật báo stale_before).
@@ -162,7 +163,7 @@ public sealed class LlmJobDispatcher(
         string flatTextAfter;
         try
         {
-            flatTextAfter = Normalizer.ToNfc(string.Join("\n", extractor.Extract(job.Path).Select(b => b.Text)));
+            flatTextAfter = Normalizer.ToNfc(string.Join("\n", extractor.Extract(job.Path).Where(b => b.Kind != BlockKind.Unreadable).Select(b => b.Text))); // [Thay đổi] H3
         }
         catch (Exception)
         {

@@ -60,10 +60,10 @@ public static class EscalationPolicy
     /// mục cha của watch-folder (VD "D:\Backup\...") không biến mọi file thành P2.</param>
     /// <param name="fileHash">SHA-256 (hex) của text — dùng để chọn mẫu P3 ổn định.</param>
     /// <param name="options">Cấu hình.</param>
-    /// <param name="needsOcr">[Thay đổi] mục 1.3/4.8: file cần OCR mới đọc được (PDF/ảnh scan) — không biết nội
-    /// dung thật sự nên KHÔNG được gửi LLM (gửi cũng vô ích, và không phải "sạch" thật).</param>
+    /// <param name="incompleteReason">[Thay đổi] H3 (trước đây: bool needsOcr, mục 1.3/4.8): file chỉ đọc được một phần — cần OCR, bị cắt
+    /// vì quá dài, có trang scan (Reading.IncompleteReasons). LLM cũng chỉ thấy đúng phần đã đọc nên KHÔNG gửi; null = đã đọc trọn file.</param>
     public static EscalationDecision Decide(RouteZone zone, int textLength, string filePath, string relativePath,
-        string fileHash, EscalationOptions options, bool needsOcr = false, IPathPolicy? pathPolicy = null)
+        string fileHash, EscalationOptions options, string? incompleteReason = null, IPathPolicy? pathPolicy = null)
     {
         // [Thay đổi] Tách lõi bước 2: LLM tắt → không bao giờ gửi, xét trước mọi điều kiện khác
         if (!options.Enabled)
@@ -73,9 +73,9 @@ public static class EscalationPolicy
 
         // Cần OCR: không biết nội dung thật sự, xét trước cả "chắc chắn" — file dạng này luôn có 0 chỗ khớp
         // (RouteZone.NoMatch) nên không đụng nhánh "chắc chắn", nhưng đặt lý do riêng để log không lẫn với "sạch"
-        if (needsOcr)
+        if (incompleteReason != null)
         {
-            return new EscalationDecision(null, "cần OCR (chưa hỗ trợ) — không đẩy LLM");
+            return new EscalationDecision(null, $"đọc chưa hết ({incompleteReason}) — không đẩy LLM"); // [Thay đổi] H3
         }
 
         // Chắc chắn → final theo regex, không bao giờ tốn LLM (xét trước để không log lý do loại thừa)

@@ -178,6 +178,10 @@ public sealed class FileProcessor
             // [Thay đổi] H1: quét lại CÙNG nội dung chỉ vì bộ rule đổi → sau khi lưu phải merge lại verdict LLM cũ (nếu có)
             bool rescanForRules = cached is { HasConclusion: true } && !reusable && cached.FileHash == hash;
 
+            // [Thay đổi] H3: đọc chưa hết (bị cắt / cần OCR / trang scan) → mọi nhánh bên dưới KHÔNG được kết luận "final": status =
+            // incomplete, needs_review, không gửi LLM; không match thì mức Unknown thay vì Public. Lấy 1 lần ở đây, 2 nhánh dùng chung.
+            string? incomplete = result.IncompleteReason;
+
             // [Thay đổi] Mở rộng định dạng: đọc được nhưng chưa trọn vẹn (bị cắt vì quá dài, PDF scan không có text)
             // — ghi cảnh báo để biết kết quả quét có thể thiếu. Đặt SAU kiểm tra hash để không lặp cảnh báo.
             if (result.Warning != null)
@@ -226,9 +230,11 @@ public sealed class FileProcessor
             {
                 // [Thay đổi] mục 1.3/4.8: "sạch" và "cần OCR" là 2 trường hợp khác nhau — file cần OCR chưa từng được
                 // đọc ra chữ nên KHÔNG BIẾT có nhạy cảm hay không, không phải thật sự "sạch"
-                if (result.NeedsOcr)
+                // [Thay đổi] H3: mở rộng cho mọi kiểu đọc chưa hết (bị cắt, trang scan), không chỉ cần OCR
+                if (incomplete != null)
                 {
-                    _logger.LogWarning("[DLP] {filePath}: cần OCR (không có text layer) — không đẩy LLM", filePath);
+                    _logger.LogWarning("[DLP] {filePath}: CHƯA QUÉT ĐỦ ({reason}) — phần đã đọc không có gì, mức Unknown, cần xem lại, không đẩy LLM",
+                        filePath, incomplete);
                 }
                 else
                 {
@@ -236,18 +242,24 @@ public sealed class FileProcessor
                 }
 
                 // [Thay đổi] Eligibility + P1/P2/P3: file sạch vẫn có thể xuống LLM nếu tên đáng nghi (P2) hoặc được chọn mẫu (P3)
-                var decision = Escalate(RouteZone.NoMatch, content.Length, filePath, hash, result.NeedsOcr);
+                // [Thay đổi] H3: incomplete → Decide trả "không gửi" (trước đây chỉ needsOcr)
+                var decision = Escalate(RouteZone.NoMatch, content.Length, filePath, hash, incomplete);
 
                 // [Thay đổi] FileConfidence (shadow): file sạch → nhánh B/Short ("có thật là Public không?")
-                var conf = ComputeFileConfidence(filePath, SensitivityLevel.Public, matches, scan.Telemetry);
+                // [Thay đổi] H3: chưa đọc hết thì câu hỏi "có thật là Public không" vô nghĩa → không tính
+                var conf = incomplete == null ? ComputeFileConfidence(filePath, SensitivityLevel.Public, matches, scan.Telemetry) : null;
 
                 classifyMs = Lap(ref lastMark); // [Thay đổi] Đo hiệu năng: file sạch → chỉ eligibility + FileConfidence
 
                 // [Thay đổi] Ghi DB: sạch → final, Public, không có finding (P2/P3 vẫn final — theo regex là sạch)
-                var outcome = TrySave(filePath, size, mtimeUtc, hash, 0, ResultStore.StatusFinal, needsReview: false,
-                    LabelsJson(SensitivityLevel.Public, []), [], llmPriority: (int?)decision.Group, needsOcr: result.NeedsOcr, conf: conf,
-                    changeToken: token); // [Thay đổi] H2
-                if (rescanForRules)
+                // [Thay đổi] H3: chưa đọc hết → incomplete + Unknown + needs_review (trước đây vẫn final + Public)
+                var outcome = TrySave(filePath, size, mtimeUtc, hash, 0,
+                    incomplete == null ? ResultStore.StatusFinal : ResultStore.StatusIncomplete,
+                    needsReview: incomplete != null,
+                    LabelsJson(incomplete == null ? SensitivityLevel.Public : SensitivityLevel.Unknown, []), [],
+                    llmPriority: (int?)decision.Group, needsOcr: result.NeedsOcr, conf: conf,
+                    changeToken: token, incompleteReason: incomplete); // [Thay đổi] H2, H3
+                if (rescanForRules && incomplete == null) // [Thay đổi] H3: ApplyMerge chốt "final" → không áp cho file incomplete
                 {
                     TryReapplyLlm(filePath, hash, 0, []); // [Thay đổi] H1
                 }
@@ -308,11 +320,19 @@ public sealed class FileProcessor
                         filePath, route.Confidence, route.Zone == RouteZone.Certain ? "chắc chắn" : "tín hiệu yếu");
                 }
 
+                // [Thay đổi] H3: đọc chưa hết → mức vừa tính chỉ là MỨC TỐI THIỂU (phần chưa đọc có thể chứa mức cao hơn)
+                if (incomplete != null)
+                {
+                    _logger.LogWarning("[DLP] {filePath}: CHƯA QUÉT ĐỦ ({reason}) — {level} chỉ là mức tối thiểu, cần xem lại, không đẩy LLM",
+                        filePath, incomplete, level);
+                }
+
                 // [Thay đổi] FileConfidence (shadow): tính song song với S1 để so sánh — Router ở trên vẫn quyết định
-                var conf = ComputeFileConfidence(filePath, level, matches, scan.Telemetry);
+                // [Thay đổi] H3: không tính cho file chưa đọc hết (điểm tin cậy trên một phần nội dung không có nghĩa)
+                var conf = incomplete == null ? ComputeFileConfidence(filePath, level, matches, scan.Telemetry) : null;
 
                 // [Thay đổi] Eligibility + P1/P2/P3: vùng xám → P1 nếu qua điều kiện cần; tín hiệu yếu → P2/P3 như file sạch
-                var decision = Escalate(route.Zone, content.Length, filePath, hash);
+                var decision = Escalate(route.Zone, content.Length, filePath, hash, incomplete); // [Thay đổi] H3: + incomplete
 
                 // [Thay đổi] Vùng xám nhưng KHÔNG đủ điều kiện gửi LLM (VD quá ít text): không có job nào sẽ chốt kết quả nên
                 // ghi luôn final + needs_review=1 (giữ điểm regex, cần người xem — giống kiến trúc mục 7 khi LLM thất bại). Để
@@ -328,16 +348,17 @@ public sealed class FileProcessor
                 // [Thay đổi] Ghi DB: vùng xám (đủ điều kiện) → provisional + needs_review (chờ LLM); còn lại → final. s1 = độ tin
                 // cậy của mức.
                 var findings = BuildFindings(matches, s1); // [Thay đổi] H1: giữ biến để dùng lại khi merge lại LLM
+                // [Thay đổi] H3: chưa đọc hết → incomplete + needs_review (decision đã là "không gửi LLM" nên waitsForLlm = false)
                 var outcome = TrySave(filePath, size, mtimeUtc, hash, route.Confidence,
-                    waitsForLlm ? ResultStore.StatusProvisional : ResultStore.StatusFinal,
-                    needsReview: route.NeedsLlm,
+                    incomplete != null ? ResultStore.StatusIncomplete : waitsForLlm ? ResultStore.StatusProvisional : ResultStore.StatusFinal,
+                    needsReview: route.NeedsLlm || incomplete != null,
                     LabelsJson(level, results.Select(r => r.Domain)),
                     findings,
                     // [Thay đổi] Hàng đợi llm_job: nhóm P1/P2/P3 → tạo job (cùng transaction với scan_result, qua hạn ngạch)
                     llmPriority: (int?)decision.Group,
                     conf: conf, // [Thay đổi] FileConfidence (shadow)
-                    changeToken: token); // [Thay đổi] H2
-                if (rescanForRules)
+                    changeToken: token, incompleteReason: incomplete); // [Thay đổi] H2, H3
+                if (rescanForRules && incomplete == null) // [Thay đổi] H3: ApplyMerge chốt "final" → không áp cho file incomplete
                 {
                     TryReapplyLlm(filePath, hash, route.Confidence, findings); // [Thay đổi] H1
                 }
@@ -478,7 +499,8 @@ public sealed class FileProcessor
     // [Thay đổi] FileConfidence (shadow): thêm conf (null = không tính được)
     private JobEnqueueOutcome TrySave(string filePath, long size, DateTime mtimeUtc, string hash, double s1, string status, bool needsReview,
         string? labelsJson, List<FindingRecord> findings, int? llmPriority = null, bool needsOcr = false, FileConfidenceResult? conf = null,
-        string? changeToken = null) // [Thay đổi] H2: dấu thay đổi chụp trước khi đọc
+        string? changeToken = null, // [Thay đổi] H2: dấu thay đổi chụp trước khi đọc
+        string? incompleteReason = null) // [Thay đổi] H3: lý do đọc chưa hết (null = đọc trọn file)
     {
         if (_store == null)
         {
@@ -493,7 +515,8 @@ public sealed class FileProcessor
                 hash, s1, status, needsReview, labelsJson, findings, llmPriority, needsOcr,
                 _scanner.RulesVer, MergePolicyVersion.Current,
                 conf?.Confidence, conf?.Branch.ToString(), // [Thay đổi] FileConfidence (shadow)
-                changeToken)); // [Thay đổi] H2
+                changeToken, // [Thay đổi] H2
+                incompleteReason)); // [Thay đổi] H3
         }
         catch (Exception ex)
         {
@@ -504,11 +527,12 @@ public sealed class FileProcessor
 
     // [Thay đổi] Eligibility + P1/P2/P3: từ khoá P2 chỉ xét phần đường dẫn TÍNH TỪ thư mục đang theo dõi (tên thư mục cha của
     // watch-folder không phải tín hiệu). Chưa StartWatching → chỉ xét tên file.
-    private EscalationDecision Escalate(RouteZone zone, int textLength, string filePath, string hash, bool needsOcr = false)
+    // [Thay đổi] H3: bool needsOcr → string? incompleteReason (mọi kiểu đọc chưa hết, không chỉ cần OCR)
+    private EscalationDecision Escalate(RouteZone zone, int textLength, string filePath, string hash, string? incompleteReason = null)
     {
         // [Thay đổi] Tách lõi bước 3: việc tìm thư mục gốc đang theo dõi thuộc FileWatcherService (nó giữ danh sách thư mục), nên nhận qua delegate
         string relative = _relativePathOf(filePath);
-        return EscalationPolicy.Decide(zone, textLength, filePath, relative, hash, _escalation, needsOcr, _pathPolicy); // [Thay đổi] Tách lõi bước 4: + _pathPolicy
+        return EscalationPolicy.Decide(zone, textLength, filePath, relative, hash, _escalation, incompleteReason, _pathPolicy); // [Thay đổi] Tách lõi bước 4: + _pathPolicy
     }
 
     // [Thay đổi] Hạn ngạch: log kết quả tạo job (không log gì khi không cần LLM / job đã có)

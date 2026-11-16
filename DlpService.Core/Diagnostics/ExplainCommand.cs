@@ -71,6 +71,7 @@ public static class ExplainCommand
         Console.WriteLine($"source        : {e.Source}");
         Console.WriteLine($"needs_review  : {e.NeedsReview}");
         Console.WriteLine($"needs_ocr     : {e.NeedsOcr}");
+        Console.WriteLine($"incomplete    : {e.IncompleteReason ?? "(không — đã đọc trọn file)"}"); // [Thay đổi] H3
         Console.WriteLine($"S1            : {e.S1:0.0000}");
         Console.WriteLine($"S_final       : {e.SFinal:0.0000}");
         Console.WriteLine($"rules_ver     : {e.RulesVer}{(e.RulesVer != currentRulesVer ? "  ⚠ KHÁC bộ rule hiện tại trên đĩa (" + currentRulesVer + ") — kết quả có thể đã lỗi thời" : "")}");

@@ -150,6 +150,7 @@ public class FileReaderService
         // thay vì gọi Extract() nhận trọn 1 chuỗi rồi mới cắt — file lớn không còn phải đọc hết vào RAM.
         var sb = new StringBuilder();
         bool truncated = false;
+        int unreadableBlocks = 0; // [Thay đổi] H3: số khối Unreadable (VD trang PDF scan)
         var timeoutWatch = Stopwatch.StartNew();
         try
         {
@@ -160,17 +161,33 @@ public class FileReaderService
                     return new FileReadResult { Success = false, ErrorMessage = $"Đọc file quá {ExtractionTimeout.TotalSeconds:0}s (nghi ngờ file bất thường)" };
                 }
 
-                if (sb.Length > 0)
+                // [Thay đổi] H3: khối đánh dấu "có nội dung nhưng không đọc được chữ" — chỉ đếm, không đem Text đi quét
+                if (block.Kind == BlockKind.Unreadable)
+                {
+                    unreadableBlocks++;
+                    continue;
+                }
+
+                // [Thay đổi] Bounded append: trước đây Append CẢ khối rồi mới so giới hạn → 1 khối 10 triệu ký tự làm buffer phình
+                // 10 triệu rồi mới cắt. Giờ tính phần còn lại của ngân sách và chỉ nối đúng phần đó.
+                int separator = sb.Length > 0 ? 1 : 0;
+                int remaining = MaxExtractedChars - sb.Length - separator;
+                if (remaining <= 0)
+                {
+                    truncated = true;
+                    break;
+                }
+                if (separator == 1)
                 {
                     sb.Append('\n');
                 }
-                sb.Append(block.Text);
-
-                if (sb.Length >= MaxExtractedChars)
+                if (block.Text.Length > remaining)
                 {
+                    sb.Append(block.Text, 0, remaining);
                     truncated = true;
-                    break; // đủ dữ liệu rồi — ngưng đọc tiếp phần còn lại của file, đỡ tốn thời gian/RAM
+                    break; // đủ ngân sách — ngưng đọc tiếp phần còn lại của file, đỡ tốn thời gian/RAM
                 }
+                sb.Append(block.Text);
             }
         }
         catch (IOException)
@@ -199,12 +216,14 @@ public class FileReaderService
 
         string? warning = null;
         bool needsOcr = false;
+        string? incompleteReason = null; // [Thay đổi] H3: cờ "đọc chưa hết" (trước đây chỉ có chuỗi Warning, pipeline không dựa vào được)
         if (truncated || content.Length > MaxExtractedChars)
         {
             warning = $"Nội dung dài, chỉ quét {MaxExtractedChars:N0} ký tự đầu";
+            incompleteReason = IncompleteReasons.Truncated;
             if (content.Length > MaxExtractedChars)
             {
-                content = content[..MaxExtractedChars];
+                content = content[..MaxExtractedChars]; // chuẩn hoá NFC có thể làm chuỗi dài thêm chút ít
             }
         }
         else if (string.IsNullOrWhiteSpace(content) && fileInfo.Length > 0)
@@ -214,6 +233,13 @@ public class FileReaderService
             // sạch — EscalationPolicy dựa vào cờ này để không đẩy xuống LLM (đọc không ra chữ thì gửi cũng vô ích).
             warning = "Không trích được text nào (có thể là PDF/ảnh scan — chưa hỗ trợ OCR)";
             needsOcr = true;
+            incompleteReason = IncompleteReasons.NeedsOcr; // [Thay đổi] H3
+        }
+        else if (unreadableBlocks > 0)
+        {
+            // [Thay đổi] H3: có chữ ở một phần, phần còn lại (trang scan) không đọc được → chưa đủ căn cứ kết luận
+            warning = $"{unreadableBlocks} phần không trích được chữ (trang ảnh scan — chưa hỗ trợ OCR), chỉ quét phần có chữ";
+            incompleteReason = IncompleteReasons.UnreadablePages;
         }
 
         // [Thay đổi] Magic bytes: ghép cảnh báo đổi đuôi với cảnh báo khác (nếu có) — không để cảnh báo này đè cảnh báo kia
@@ -222,7 +248,7 @@ public class FileReaderService
             warning = warning == null ? mismatchWarning : mismatchWarning + "; " + warning;
         }
 
-        return new FileReadResult { Success = true, Content = content, Warning = warning, NeedsOcr = needsOcr };
+        return new FileReadResult { Success = true, Content = content, Warning = warning, NeedsOcr = needsOcr, IncompleteReason = incompleteReason };
     }
 
     // [Thay đổi] Magic bytes: các đuôi là văn bản thuần — nội dung "Text" ở đây là đúng loại, không phải đổi đuôi
@@ -297,4 +323,25 @@ public class FileReadResult
     // được, không phải file thật sự sạch. EscalationPolicy dùng cờ này để không đẩy xuống LLM.
     /// <summary>true nếu file cần OCR (chưa hỗ trợ) mới đọc được nội dung.</summary>
     public bool NeedsOcr { get; set; }
+
+    // [Thay đổi] H3: đọc thành công nhưng CHƯA HẾT nội dung → pipeline không được kết luận "sạch"/"final" (xem IncompleteReasons)
+    /// <summary>Lý do đọc chưa hết (giá trị trong <see cref="IncompleteReasons"/>); null nếu đã đọc trọn file.</summary>
+    public string? IncompleteReason { get; set; }
+
+    /// <summary>true nếu đã trích được TOÀN BỘ nội dung có chữ của file.</summary>
+    public bool IsComplete => IncompleteReason == null;
+}
+
+// [Thay đổi] H3: mã lý do ghi vào scan_result.incomplete_reason (chuỗi cố định để truy vấn/thống kê được, không phải câu tiếng Việt)
+/// <summary>Các lý do một file chỉ được đọc một phần.</summary>
+public static class IncompleteReasons
+{
+    /// <summary>Nội dung vượt giới hạn ký tự, phần sau không được quét.</summary>
+    public const string Truncated = "truncated";
+
+    /// <summary>Không trích được chữ nào (PDF/ảnh scan) — cần OCR.</summary>
+    public const string NeedsOcr = "needs_ocr";
+
+    /// <summary>Một phần (VD trang PDF scan) không trích được chữ.</summary>
+    public const string UnreadablePages = "unreadable_pages";
 }

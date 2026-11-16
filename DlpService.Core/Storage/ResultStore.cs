@@ -35,9 +35,11 @@ public sealed record FindingRecord(string RuleId, double Score, bool? ValidatorP
 /// <param name="FileConf">[Thay đổi] FileConfidence 2 nhánh (shadow): điểm 0-1; null = không tính (quét chưa trọn / chưa nạp model).</param>
 /// <param name="ConfBranch">[Thay đổi] FileConfidence 2 nhánh: "A" / "B" / "Short"; null khi FileConf null.</param>
 /// <param name="ChangeToken">[Thay đổi] H2: dấu thay đổi (IFileChangeToken) chụp cùng lúc với size/mtime; null = nền tảng không hỗ trợ.</param>
+/// <param name="IncompleteReason">[Thay đổi] H3: lý do chỉ đọc được một phần (Reading.IncompleteReasons); null = đã đọc trọn file.</param>
 public sealed record ScanRecord(string Path, long Size, DateTime MtimeUtc, string FileHash, double S1, string Status,
     bool NeedsReview, string? LabelsJson, IReadOnlyList<FindingRecord> Findings, int? LlmPriority = null, bool NeedsOcr = false,
-    string RulesVer = "", string MergePolicyVer = "", double? FileConf = null, string? ConfBranch = null, string? ChangeToken = null);
+    string RulesVer = "", string MergePolicyVer = "", double? FileConf = null, string? ConfBranch = null, string? ChangeToken = null,
+    string? IncompleteReason = null);
 
 // [Thay đổi] Merger mục 7.4 "Lưu vết": đọc gộp lại đúng 8 trường mục 7.4 yêu cầu, vì chúng đang nằm ở 2 bảng khác
 // nhau (scan_result và llm_result) — phục vụ debug/audit, không dùng trong luồng xử lý chính.
@@ -82,6 +84,11 @@ public sealed partial class ResultStore : IDisposable
 
     /// <summary>Trạng thái kết quả: đã chốt.</summary>
     public const string StatusFinal = "final";
+
+    // [Thay đổi] H3: trạng thái thứ 3 — file chỉ đọc được MỘT PHẦN (bị cắt, cần OCR, trang scan). Khác "final": nhãn chỉ là mức tối thiểu
+    // (hoặc Unknown), cần người xem; khác "provisional": không có job LLM nào sẽ chốt nó (LLM cũng chỉ thấy đúng phần đã đọc).
+    /// <summary>Trạng thái kết quả: chưa quét đủ nội dung (lý do ở cột incomplete_reason), cần xem lại.</summary>
+    public const string StatusIncomplete = "incomplete";
 
     // Chưa có LLM nên mọi kết quả đều từ regex
     private const string SourceRegex = "regex";
@@ -153,7 +160,8 @@ public sealed partial class ResultStore : IDisposable
               needs_ocr    INTEGER NOT NULL DEFAULT 0,
               rules_ver        TEXT NOT NULL DEFAULT '',
               merge_policy_ver TEXT NOT NULL DEFAULT '',
-              updated_utc  INTEGER NOT NULL
+              updated_utc  INTEGER NOT NULL,
+              incomplete_reason TEXT
             );
             CREATE TABLE IF NOT EXISTS finding (
               id               INTEGER PRIMARY KEY,
@@ -264,6 +272,16 @@ public sealed partial class ResultStore : IDisposable
         try
         {
             Execute("ALTER TABLE scan_result ADD COLUMN conf_branch TEXT;");
+        }
+        catch (SqliteException ex) when (ex.Message.Contains("duplicate column", StringComparison.OrdinalIgnoreCase))
+        {
+            // Cột đã có sẵn — không phải lỗi
+        }
+
+        // [Thay đổi] H3: lý do quét chưa đủ (IncompleteReasons). NULL = đã đọc trọn file.
+        try
+        {
+            Execute("ALTER TABLE scan_result ADD COLUMN incomplete_reason TEXT;");
         }
         catch (SqliteException ex) when (ex.Message.Contains("duplicate column", StringComparison.OrdinalIgnoreCase))
         {
@@ -426,14 +444,14 @@ public sealed partial class ResultStore : IDisposable
                 // 2) scan_result: chưa có LLM → s_final = s1, source = regex
                 // [Thay đổi] Merger mục 7.4 "Lưu vết": ghi kèm rules_ver/merge_policy_ver ngay từ Pass 1
                 using (var cmd = Command(transaction, """
-                    INSERT INTO scan_result (file_id, file_hash, s1, s_final, status, source, labels_json, needs_review, needs_ocr, rules_ver, merge_policy_ver, file_conf, conf_branch, updated_utc)
-                    VALUES ($id, $hash, $s1, $s1, $status, $source, $labels, $review, $ocr, $rulesver, $mergever, $fileconf, $confbranch, $now)
+                    INSERT INTO scan_result (file_id, file_hash, s1, s_final, status, source, labels_json, needs_review, needs_ocr, rules_ver, merge_policy_ver, file_conf, conf_branch, updated_utc, incomplete_reason)
+                    VALUES ($id, $hash, $s1, $s1, $status, $source, $labels, $review, $ocr, $rulesver, $mergever, $fileconf, $confbranch, $now, $incomplete)
                     ON CONFLICT(file_id) DO UPDATE SET
                       file_hash = excluded.file_hash, s1 = excluded.s1, s_final = excluded.s_final, status = excluded.status,
                       source = excluded.source, labels_json = excluded.labels_json, needs_review = excluded.needs_review,
                       needs_ocr = excluded.needs_ocr, rules_ver = excluded.rules_ver, merge_policy_ver = excluded.merge_policy_ver,
                       file_conf = excluded.file_conf, conf_branch = excluded.conf_branch,
-                      updated_utc = excluded.updated_utc;
+                      updated_utc = excluded.updated_utc, incomplete_reason = excluded.incomplete_reason;
                     """))
                 {
                     cmd.Parameters.AddWithValue("$id", fileId);
@@ -449,6 +467,7 @@ public sealed partial class ResultStore : IDisposable
                     // [Thay đổi] FileConfidence 2 nhánh (shadow)
                     cmd.Parameters.AddWithValue("$fileconf", (object?)record.FileConf ?? DBNull.Value);
                     cmd.Parameters.AddWithValue("$confbranch", (object?)record.ConfBranch ?? DBNull.Value);
+                    cmd.Parameters.AddWithValue("$incomplete", (object?)record.IncompleteReason ?? DBNull.Value); // [Thay đổi] H3
                     cmd.Parameters.AddWithValue("$now", now);
                     cmd.ExecuteNonQuery();
                 }

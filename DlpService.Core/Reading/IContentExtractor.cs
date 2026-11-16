@@ -25,7 +25,12 @@ public enum BlockKind
     TableRow,
 
     /// <summary>Đánh dấu ranh giới lớn: bắt đầu 1 sheet, 1 slide, 1 trang PDF... (Text = tên/số thứ tự).</summary>
-    SectionMarker
+    SectionMarker,
+
+    // [Thay đổi] H3: extractor trả nội dung kiểu streaming (yield return) nên không có chỗ trả thêm cờ "đọc chưa hết" — dùng 1 khối đánh dấu
+    // trong chính luồng khối. FileReaderService KHÔNG đem Text của khối này đi quét, chỉ ghi nhận "file có phần chưa đọc được".
+    /// <summary>Phần nội dung CÓ THẬT nhưng không trích được chữ (VD trang PDF chỉ có ảnh scan). Text = mô tả vị trí (VD "Trang 3").</summary>
+    Unreadable
 }
 
 /// <summary>1 khối nội dung được trích ra, kèm ngữ cảnh nó thuộc về — để không bị "mất gốc" khi tách nhỏ file lớn

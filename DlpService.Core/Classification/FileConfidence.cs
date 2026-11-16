@@ -92,7 +92,9 @@ public sealed class FileConfidenceModel
         {
             throw new InvalidDataException($"Model thiếu intercept theo domain: {path}");
         }
-        foreach (var level in Enum.GetNames<SensitivityLevel>())
+        // [Thay đổi] H3: bỏ Unknown — không phải mức nhạy cảm thật (chỉ là "chưa kết luận"), model không có và không cần ngưỡng cho nó.
+        // Thiếu dòng lọc này thì Load ném lỗi → FileConfidence (shadow) bị tắt im lặng trên service thật.
+        foreach (var level in Enum.GetNames<SensitivityLevel>().Where(n => n != nameof(SensitivityLevel.Unknown)))
         {
             if (!model.KeepThresholdByLevel.ContainsKey(level))
             {
