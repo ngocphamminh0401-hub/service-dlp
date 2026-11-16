@@ -122,6 +122,29 @@ public sealed class FileProcessorIncompleteTests : IDisposable
         Assert.Equal(ProcessOutcome.Unchanged, Processor().ProcessFile(file));
     }
 
+    // [Thay đổi] H4: zip bomb không còn "đọc thất bại" (không ghi DB, lọt khỏi kết quả) mà được ghi incomplete + Unknown, có cache
+    [Fact]
+    public void Zip_bomb_duoc_ghi_incomplete_limit_exceeded_va_khong_mo_lai()
+    {
+        string file = Path.Combine(_work, "luong-bomb.docx"); // tên chứa "luong" → chứng minh không đẩy LLM
+        using (var zip = System.IO.Compression.ZipFile.Open(file, System.IO.Compression.ZipArchiveMode.Create))
+        {
+            using var s = zip.CreateEntry("word/document.xml", System.IO.Compression.CompressionLevel.Optimal).Open();
+            byte[] zeros = new byte[1024 * 1024];
+            for (int i = 0; i < 250; i++) s.Write(zeros); // 250 MB toàn số 0 → nén ~1000 ×
+        }
+
+        Assert.Equal(ProcessOutcome.Scanned, Processor().ProcessFile(file));
+
+        Assert.Equal(ResultStore.StatusIncomplete, Col(file, "status"));
+        Assert.Equal(IncompleteReasons.LimitExceeded, Col(file, "incomplete_reason"));
+        Assert.Contains("\"Unknown\"", Col(file, "labels_json"));
+        Assert.Equal("1", Col(file, "needs_review"));
+        Assert.Equal("0", Col(file, "jobs"));
+
+        Assert.Equal(ProcessOutcome.Unchanged, Processor().ProcessFile(file)); // không mở lại mỗi lượt đối soát
+    }
+
     [Fact]
     public void Unknown_nho_hon_Public_va_khong_doi_gia_tri_mac_dinh()
     {

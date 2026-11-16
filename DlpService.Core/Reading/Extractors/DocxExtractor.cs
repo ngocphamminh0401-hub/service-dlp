@@ -22,9 +22,10 @@ public class DocxExtractor : IContentExtractor
     /// <inheritdoc/>
     public IEnumerable<ContentBlock> Extract(string filePath)
     {
-        ExtractorHelpers.EnsureNotZipBomb(filePath); // [Thay đổi] Bước 12: soi trước, chặn zip bomb
-
+        // [Thay đổi] H4: kiểm ngân sách giải nén trên CHÍNH stream sẽ đọc (trước đây: kiểm 1 lần mở, đọc ở lần mở thứ 2 → file bị thay giữa
+        // 2 lần mở thì bản đọc thật không được kiểm). Ngân sách Dom: docx nạp XML thành cây đối tượng (main.Document) → RAM ≈ 5–10 × XML.
         using var stream = ExtractorHelpers.OpenShared(filePath);
+        ZipLimits.EnsureWithin(stream, ZipLimits.Dom);
         using var document = WordprocessingDocument.Open(stream, isEditable: false);
         var main = document.MainDocumentPart ?? throw new InvalidDataException("File .docx không có phần nội dung chính");
 

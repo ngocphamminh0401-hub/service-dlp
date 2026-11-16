@@ -5,6 +5,7 @@ using System.Diagnostics;
 using System.Reflection;
 using System.Text;
 using DlpService.Platform; // [Thay đổi] Tách lõi bước 4: IPathPolicy
+using DlpService.Reading.Extractors; // [Thay đổi] H4: ExtractionLimitException
 using DlpService.Text;
 
 namespace DlpService.Reading;
@@ -190,6 +191,19 @@ public class FileReaderService
                 sb.Append(block.Text);
             }
         }
+        // [Thay đổi] H4: vượt ngân sách giải nén (ZipLimits) — KHÔNG phải file hỏng. Phải đặt TRƯỚC "catch (Exception)" (C# thử catch từ trên
+        // xuống, nhánh chung sẽ nuốt mất). Trước đây zip bomb → Success=false → không ghi DB → file lọt khỏi kết quả DLP và bị mở lại mỗi lượt
+        // đối soát. Giờ: đọc "thành công" với nội dung rỗng + lý do limit_exceeded → pipeline (H3) ghi incomplete + Unknown + needs_review.
+        catch (ExtractionLimitException ex)
+        {
+            return new FileReadResult
+            {
+                Success = true,
+                Content = string.Empty,
+                Warning = ex.Message, // chỉ loại giới hạn + con số, không có tên phần/nội dung
+                IncompleteReason = IncompleteReasons.LimitExceeded
+            };
+        }
         catch (IOException)
         {
             return new FileReadResult { Success = false, ErrorMessage = "File đang bị khóa" };
@@ -344,4 +358,8 @@ public static class IncompleteReasons
 
     /// <summary>Một phần (VD trang PDF scan) không trích được chữ.</summary>
     public const string UnreadablePages = "unreadable_pages";
+
+    // [Thay đổi] H4
+    /// <summary>File vượt giới hạn tài nguyên khi đọc (VD ngân sách giải nén ZIP) — không đọc được gì.</summary>
+    public const string LimitExceeded = "limit_exceeded";
 }

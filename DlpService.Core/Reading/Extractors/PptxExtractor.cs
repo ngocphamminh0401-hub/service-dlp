@@ -22,9 +22,9 @@ public class PptxExtractor : IContentExtractor
     /// <inheritdoc/>
     public IEnumerable<ContentBlock> Extract(string filePath)
     {
-        ExtractorHelpers.EnsureNotZipBomb(filePath); // [Thay đổi] Bước 12: soi trước, chặn zip bomb
-
+        // [Thay đổi] H4: kiểm ngân sách trên chính stream sẽ đọc; pptx cũng nạp DOM (slidePart.Slide) → ngân sách Dom
         using var stream = ExtractorHelpers.OpenShared(filePath);
+        ZipLimits.EnsureWithin(stream, ZipLimits.Dom);
         using var document = PresentationDocument.Open(stream, isEditable: false);
         var presentation = document.PresentationPart ?? throw new InvalidDataException("File .pptx không có phần trình chiếu");
 

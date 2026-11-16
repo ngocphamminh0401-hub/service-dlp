@@ -133,6 +133,16 @@ public static class FileTypeSniffer
     {
         try
         {
+            // [Thay đổi] H4: sniffer chạy TRƯỚC kiểm tra kích thước file và trước ngân sách của extractor. Duyệt archive.Entries buộc .NET dựng
+            // object cho MỌI phần — ZIP hàng triệu phần (vài chục MB) tốn hàng trăm MB RAM chỉ để đoán loại. Đọc EOCD (vài byte cuối file)
+            // trước: vượt ngưỡng → OtherZip, bộ đọc theo đuôi sẽ từ chối bằng ExtractionLimitException.
+            var budget = Extractors.ZipLimits.Dom;
+            if (Extractors.ZipLimits.ReadDirectoryInfo(stream) is { } dir
+                && (dir.Entries > budget.MaxEntries || dir.DirectoryBytes > budget.MaxCentralDirectoryBytes))
+            {
+                return DetectedFormat.OtherZip;
+            }
+
             stream.Position = 0;
             using var archive = new ZipArchive(stream, ZipArchiveMode.Read, leaveOpen: true);
             foreach (var entry in archive.Entries)

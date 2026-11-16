@@ -1,42 +1,13 @@
 // [Thay đổi] File mới (mở rộng định dạng - Bước 2): tiện ích dùng chung cho mọi extractor
-// [Thay đổi] Chặn zip bomb (Bước 12): thêm EnsureNotZipBomb — soi trước kích thước giải nén của từng phần trong
-// file ZIP (.docx/.xlsx/.pptx đều là file ZIP) trước khi đưa cho thư viện đọc thật sự xử lý.
-using System.IO.Compression;
+// [Thay đổi] Chặn zip bomb (Bước 12) → H4: chuyển sang ZipLimits.cs (ngân sách giải nén đầy đủ).
 
 namespace DlpService.Reading.Extractors;
 
 /// <summary>Tiện ích dùng chung: mở file ở chế độ chia sẻ, quy ước nối ô bảng.</summary>
 internal static class ExtractorHelpers
 {
-    // Kích thước SAU GIẢI NÉN tối đa cho phép của 1 phần bên trong file ZIP. Zip bomb khai báo trong header ZIP
-    // 1 phần chỉ vài KB nén nhưng giải nén ra hàng trăm GB (toàn số 0, nén được cực mạnh) — chặn TRƯỚC khi giải nén.
-    private const long MaxUncompressedEntryBytes = 200L * 1024 * 1024; // 200MB
-
-    /// <summary>Từ chối file nếu có phần bên trong khai báo giải nén ra quá lớn (nghi ngờ zip bomb). File không
-    /// phải định dạng ZIP (vd .xls nhị phân cũ) thì bỏ qua, không áp dụng kiểm tra này.</summary>
-    /// <param name="filePath">Đường dẫn file .docx/.xlsx/.pptx cần kiểm tra trước khi mở bằng OpenXml/ExcelDataReader.</param>
-    public static void EnsureNotZipBomb(string filePath)
-    {
-        using var stream = OpenShared(filePath);
-
-        Span<byte> magic = stackalloc byte[2];
-        bool isZip = stream.Read(magic) == 2 && magic[0] == (byte)'P' && magic[1] == (byte)'K';
-        if (!isZip)
-        {
-            return;
-        }
-
-        stream.Position = 0;
-        using var archive = new ZipArchive(stream, ZipArchiveMode.Read, leaveOpen: true);
-        foreach (var entry in archive.Entries)
-        {
-            if (entry.Length > MaxUncompressedEntryBytes)
-            {
-                throw new InvalidDataException(
-                    $"Nghi ngờ zip bomb: 1 phần trong file giải nén ra > {MaxUncompressedEntryBytes / 1024 / 1024}MB");
-            }
-        }
-    }
+    // [Thay đổi] H4: EnsureNotZipBomb (chỉ chặn 1 phần > 200 MB, kiểm ở lần mở file riêng) đã thay bằng ZipLimits.EnsureWithin —
+    // ngân sách tổng + số phần + tỉ lệ nén, kiểm trên chính stream extractor sẽ đọc.
 
     /// <summary>Ký tự nối các ô trong 1 hàng bảng (Excel, bảng Word/PowerPoint) — mỗi hàng thành 1 dòng text, để chế độ
     /// bảng của proximity và volume_escalation hoạt động như với CSV.</summary>

@@ -7,6 +7,7 @@ using DlpService.Storage; // [Thay đổi] Ghi finding + scan_result
 using DlpService.Pipeline; // [Thay đổi] Tách lõi bước 5: IJobDispatchLoop
 using DlpService.Reading;
 using DlpService.Reading.Native; // [Thay đổi] Tika native: cấu hình + vòng đời thư viện native
+using DlpService.Reading.Extractors; // [Thay đổi] H4: ZipLimits
 
 namespace DlpService;
 
@@ -31,6 +32,9 @@ public class Worker(ILogger<Worker> logger, IConfiguration configuration, IAppLa
         // [Thay đổi] Tika native: đọc cấu hình mục "TikaNative" TRƯỚC khi tạo FileReaderService đầu tiên (FileReaderService tự đăng ký
         // extractor bằng reflection và hỏi danh sách đuôi hỗ trợ ngay lúc được tạo). Mặc định Enabled = false → không có gì thay đổi.
         TikaNativeRuntime.Configure(configuration.GetSection("TikaNative").Get<TikaNativeOptions>() ?? new TikaNativeOptions(), logger);
+        // [Thay đổi] H4: ngân sách giải nén file Office (zip bomb) — cùng lý do đặt TRƯỚC khi tạo FileReaderService như Tika ở trên.
+        // Thiếu mục "Reading:Zip" → mặc định chặt trong ZipLimitOptions; giá trị sai → mặc định + cảnh báo.
+        ZipLimits.Configure(configuration.GetSection("Reading:Zip").Get<ZipLimitOptions>() ?? new ZipLimitOptions(), logger);
 
         // [Thay đổi] Nạp rule từ thư mục rules/ nằm cạnh file .exe (không dùng đường dẫn tương đối,
         // vì khi chạy thành Windows Service thư mục làm việc không phải thư mục project)

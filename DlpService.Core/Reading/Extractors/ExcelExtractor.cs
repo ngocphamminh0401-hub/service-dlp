@@ -19,9 +19,10 @@ public class ExcelExtractor : IContentExtractor
     /// <inheritdoc/>
     public IEnumerable<ContentBlock> Extract(string filePath)
     {
-        ExtractorHelpers.EnsureNotZipBomb(filePath); // [Thay đổi] Bước 12: soi trước, chặn zip bomb (.xlsx là ZIP; .xls cũ tự bỏ qua)
-
+        // [Thay đổi] H4: kiểm ngân sách trên chính stream sẽ đọc. Ngân sách Streaming: ExcelDataReader đọc sheet theo từng hàng (sheet lớn
+        // được phép hơn docx), riêng sharedStrings.xml bị nạp hết vào RAM nên có ngưỡng riêng. .xls nhị phân cũ không phải ZIP → tự bỏ qua.
         using var stream = ExtractorHelpers.OpenShared(filePath);
+        ZipLimits.EnsureWithin(stream, ZipLimits.Streaming);
         // CreateReader tự nhận ra .xlsx (OpenXML) hay .xls (BIFF nhị phân) theo NỘI DUNG file, không theo đuôi.
         // File .xls cần bảng mã Windows — đã đăng ký CodePagesEncodingProvider ở FileReaderService.
         using var reader = ExcelReaderFactory.CreateReader(stream);

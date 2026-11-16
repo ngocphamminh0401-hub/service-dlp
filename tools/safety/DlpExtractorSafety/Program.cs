@@ -33,6 +33,10 @@ foreach (var ext in new[] { ".docx", ".xlsx", ".pptx" })
     report.RunRejected($"Zip bomb {ext}", reader, path, fastEnough);
 }
 
+// [Thay đổi] H4: đúng lỗi review nêu — mỗi phần dưới ngưỡng 1 phần nhưng TỔNG vượt (trước H4: qua hết, chỉ chặn từng phần > 200 MB)
+report.Section("1b. Nhiều phần, mỗi phần dưới ngưỡng nhưng tổng vượt ngân sách (.docx 3 × 20 MB, ngân sách docx 48 MB)");
+report.RunRejected(".docx 3 phần × 20 MB", reader, Samples.ManyEntries(work, ".docx", entries: 3, megabytesEach: 20), fastEnough);
+
 report.Section("2. Lồng cấu trúc quá sâu (30 lớp, giới hạn cho phép là 20)");
 report.RunRejected(".docx lồng 30 lớp content control", reader, Samples.DeeplyNestedDocx(work, depth: 30), fastEnough);
 report.RunRejected(".eml lồng 30 lớp multipart", reader, Samples.DeeplyNestedEml(work, depth: 30), fastEnough);
@@ -55,8 +59,8 @@ return report.Failures == 0 ? 0 : 1;
 internal static class Samples
 {
     /// <summary>File ZIP mang đúng đuôi định dạng OOXML nhưng có 1 entry toàn số 0 (nén cực mạnh), giải nén ra
-    /// ~250MB — vượt ngưỡng 200MB trong ExtractorHelpers.EnsureNotZipBomb. Không cần là .docx/.xlsx/.pptx hợp lệ
-    /// thật sự: EnsureNotZipBomb chạy TRƯỚC khi OpenXml/ExcelDataReader mở file, nên chỉ cần đúng là file ZIP.</summary>
+    /// ~250MB — vượt ngân sách ZipLimits (H4: tỉ lệ nén + kích thước 1 phần). Không cần là .docx/.xlsx/.pptx hợp lệ
+    /// thật sự: ZipLimits.EnsureWithin chạy TRƯỚC khi OpenXml/ExcelDataReader đọc, nên chỉ cần đúng là file ZIP.</summary>
     public static string ZipBomb(string dir, string extension)
     {
         string path = Path.Combine(dir, "zipbomb" + extension);
@@ -68,6 +72,29 @@ internal static class Samples
             for (int i = 0; i < 250; i++) // 250 x 1MB = ~250MB sau giải nén
             {
                 stream.Write(buffer);
+            }
+        }
+        return path;
+    }
+
+    // [Thay đổi] H4: N phần, mỗi phần "megabytesEach" MB dạng XML (bắt đầu '<') + chữ ngẫu nhiên (KHÔNG bị bắt bởi tỉ lệ nén) → chỉ ngân
+    // sách TỔNG chặn được
+    public static string ManyEntries(string dir, string extension, int entries, int megabytesEach)
+    {
+        string path = Path.Combine(dir, $"many-{entries}x{megabytesEach}{extension}");
+        var rng = new Random(42);
+        byte[] buffer = new byte[1024 * 1024];
+        using (var zip = ZipFile.Open(path, ZipArchiveMode.Create))
+        {
+            for (int e = 0; e < entries; e++)
+            {
+                using var stream = zip.CreateEntry($"word/part{e}.xml", CompressionLevel.Fastest).Open();
+                for (int i = 0; i < megabytesEach; i++)
+                {
+                    for (int j = 0; j < buffer.Length; j++) buffer[j] = (byte)('a' + rng.Next(4)); // chữ ngẫu nhiên: không bị bắt bởi tỉ lệ nén
+                    if (i == 0) buffer[0] = (byte)'<'; // H4: ZipLimits tính phần là "nội dung XML" theo byte đầu → bắt đầu bằng '<' như XML thật
+                    stream.Write(buffer);
+                }
             }
         }
         return path;
@@ -166,8 +193,11 @@ internal sealed class SafetyReport
         var result = reader.TryReadFile(filePath);
         sw.Stop();
 
-        bool ok = !result.Success && sw.Elapsed <= maxDuration;
-        Check(name, ok, $"Success={result.Success}, lý do=\"{result.ErrorMessage}\", mất {sw.Elapsed.TotalSeconds:0.00}s (giới hạn {maxDuration.TotalSeconds:0}s)");
+        // [Thay đổi] H4: vượt ngân sách giải nén giờ trả Success=true + IncompleteReason=limit_exceeded (để pipeline ghi incomplete, không
+        // lọt im lặng) — cũng tính là "bị chặn đúng" vì không có nội dung nào được giải nén/đọc
+        bool rejected = !result.Success || result.IncompleteReason == IncompleteReasons.LimitExceeded;
+        bool ok = rejected && sw.Elapsed <= maxDuration;
+        Check(name, ok, $"Success={result.Success}, chưa đọc hết={result.IncompleteReason ?? "-"}, lý do=\"{result.ErrorMessage ?? result.Warning}\", mất {sw.Elapsed.TotalSeconds:0.00}s (giới hạn {maxDuration.TotalSeconds:0}s)");
     }
 
     /// <summary>Kỳ vọng file ĐỌC ĐƯỢC (Success=true) và xong trong vòng "maxDuration" — dùng cho ca đối chứng.</summary>
