@@ -30,4 +30,6 @@ builder.Services.AddHostedService<Worker>();
 
 var host = builder.Build();
 host.Run();
-return 0;
+// [Thay đổi] M1: trả mã thoát Worker đã đặt (VD 1 khi không khoá được thư mục DB). "return 0" cũ GHI ĐÈ Environment.ExitCode → systemd/SCM luôn
+// thấy dừng bình thường, không biết service đã tự dừng vì lỗi.
+return Environment.ExitCode;

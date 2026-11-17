@@ -115,14 +115,19 @@ public sealed partial class ResultStore : IDisposable
     /// <param name="quota">[Thay đổi] Hạn ngạch job P1/P2/P3 + giới hạn hàng đợi; null = mặc định.</param>
     /// <param name="guard">[Thay đổi] Tách lõi bước 4: khoá quyền thư mục dữ liệu (Windows: ACL; Linux: chmod). null = KHÔNG khoá và ghi cảnh báo —
     /// chỉ chấp nhận cho test/tool; host của service thật phải truyền guard của hệ điều hành mình.</param>
-    public ResultStore(string dbPath, ILogger? logger = null, JobQuotaOptions? quota = null, IDataFolderGuard? guard = null)
+    /// <param name="requireProtectedFolder">[Thay đổi] M1: true = không khoá được thư mục dữ liệu thì ném <see cref="DataFolderProtectionException"/>
+    /// TRƯỚC khi tạo file DB (service chạy thật); false (mặc định — test/tool) = chỉ cảnh báo như trước.</param>
+    /// <exception cref="DataFolderProtectionException">requireProtectedFolder = true và thư mục không khoá được.</exception>
+    public ResultStore(string dbPath, ILogger? logger = null, JobQuotaOptions? quota = null, IDataFolderGuard? guard = null,
+        bool requireProtectedFolder = false)
     {
         _quota = quota ?? new JobQuotaOptions(); // [Thay đổi] Hạn ngạch
         string? folder = Path.GetDirectoryName(Path.GetFullPath(dbPath));
         if (!string.IsNullOrEmpty(folder))
         {
             Directory.CreateDirectory(folder);
-            RestrictFolder(folder, guard, logger); // [Thay đổi] khoá quyền thư mục dữ liệu, trước khi tạo file DB
+            // [Thay đổi] khoá quyền thư mục dữ liệu, TRƯỚC khi tạo file DB. [Thay đổi] M1: + requireProtectedFolder (fail-closed)
+            RestrictFolder(folder, guard, logger, requireProtectedFolder);
         }
 
         _connection = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = dbPath }.ToString());
@@ -357,17 +362,36 @@ public sealed partial class ResultStore : IDisposable
     // cả ổ với mọi người dùng khác.
     // [Thay đổi] Tách lõi bước 4: không còn gọi thẳng DataFolderSecurity (ACL Windows) sau OperatingSystem.IsWindows() — việc khoá do
     // IDataFolderGuard của hệ điều hành đảm nhiệm, nên lõi không phụ thuộc API Windows.
-    private static void RestrictFolder(string folder, IDataFolderGuard? guard, ILogger? logger)
+    // [Thay đổi] M1: requireProtected = true (service chạy thật) → mọi trường hợp KHÔNG khoá được đều ném DataFolderProtectionException (fail-closed)
+    // thay vì cảnh báo rồi mở DB tiếp. Gồm cả 2 lỗ trước đây không ai thấy: guard "không khoá gì" (NoOp, Enforces = false) và chmod không có tác
+    // dụng (LinuxDataFolderGuard đọc lại quyền rồi ném lỗi). false (test/tool) → cảnh báo như cũ.
+    private static void RestrictFolder(string folder, IDataFolderGuard? guard, ILogger? logger, bool requireProtected)
     {
+        void Unprotected(string reason, Exception? ex = null)
+        {
+            if (requireProtected)
+            {
+                throw new DataFolderProtectionException(folder, reason, ex);
+            }
+            logger?.LogWarning(ex, "[DB] {reason} — thư mục dữ liệu {folder} KHÔNG được khoá quyền, tài khoản khác có thể đọc DB", reason, folder);
+        }
+
         if (guard == null)
         {
-            logger?.LogWarning("[DB] Chưa cấu hình IDataFolderGuard — thư mục dữ liệu {folder} KHÔNG được khoá quyền", folder);
+            Unprotected("chưa cấu hình IDataFolderGuard");
+            return;
+        }
+
+        if (!guard.Enforces)
+        {
+            Unprotected($"guard không khoá quyền ({guard.Description})");
             return;
         }
 
         if (string.Equals(Path.GetPathRoot(folder), folder, StringComparison.OrdinalIgnoreCase))
         {
-            logger?.LogWarning("[DB] Không đặt quyền cho {folder} vì là gốc ổ đĩa — hãy để DB trong thư mục riêng", folder);
+            // Không khoá gốc ổ đĩa (VD DbPath = "D:\dlp.db") vì sẽ khoá cả ổ với mọi người dùng khác
+            Unprotected("thư mục là gốc ổ đĩa — hãy để DB trong thư mục riêng");
             return;
         }
 
@@ -379,7 +403,7 @@ public sealed partial class ResultStore : IDisposable
         }
         catch (Exception ex)
         {
-            logger?.LogWarning(ex, "[DB] Không đặt được quyền cho {folder}, DB vẫn dùng được nhưng tài khoản khác có thể đọc", folder);
+            Unprotected("không đặt được quyền", ex);
         }
     }
 

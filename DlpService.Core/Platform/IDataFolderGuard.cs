@@ -14,4 +14,9 @@ public interface IDataFolderGuard
 
     /// <summary>Mô tả ngắn quyền sau khi khoá, dùng để ghi log (VD "SYSTEM, Administrators, tài khoản hiện tại").</summary>
     string Description { get; }
+
+    // [Thay đổi] M1: default interface member — guard Windows/Linux không phải sửa (mặc định true); chỉ NoOpDataFolderGuard trả false.
+    // ResultStore dùng cờ này để không coi "guard không khoá gì" là đã bảo vệ (trước đây NoOp chạy êm, log "(không khoá)" rồi mở DB).
+    /// <summary>true nếu <see cref="Restrict"/> thật sự giới hạn quyền truy cập (false = guard chỉ để chạy thử/test).</summary>
+    bool Enforces => true;
 }

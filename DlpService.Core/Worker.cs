@@ -18,7 +18,8 @@ namespace DlpService;
 public class Worker(ILogger<Worker> logger, IConfiguration configuration, IAppLayout layout, IPathPolicy pathPolicy, IDataFolderGuard dataFolderGuard,
     // [Thay đổi] Tách lõi bước 5: vòng điều phối job (LLM) do host đăng ký, có thể không có
     IJobDispatchLoop? dispatchLoop = null, IFileChangeSource? changeSource = null,
-    IFileChangeToken? changeToken = null) : BackgroundService // [Thay đổi] H2: dấu thay đổi do host đăng ký (Linux); không đăng ký → chỉ size/mtime
+    IFileChangeToken? changeToken = null, // [Thay đổi] H2: dấu thay đổi do host đăng ký (Linux); không đăng ký → chỉ size/mtime
+    IHostApplicationLifetime? lifetime = null) : BackgroundService // [Thay đổi] M1: để tự dừng cả service (exit code 1) khi không khoá được thư mục DB
 {
     // [Sửa lỗi] Watcher bị GC thu hồi khi service rảnh: trước đây FileWatcherService chỉ là BIẾN CỤC BỘ trong ExecuteAsync và không
     // được dùng sau "await Task.WhenAll" → bản Release không giữ nó trong state machine async; FileSystemWatcher của .NET chỉ tự giữ
@@ -92,11 +93,31 @@ public class Worker(ILogger<Worker> logger, IConfiguration configuration, IAppLa
             escalation.MinTextChars, escalation.ExcludedPaths.Count, escalation.SuspiciousKeywords.Count, escalation.SampleRatePct,
             quota.P1PerHour, quota.P2PerDay, quota.P3PerDay, quota.MaxPendingJobs);
 
+        // [Thay đổi] M1: mặc định BẮT BUỘC khoá được thư mục DB (DB chứa nhãn + đường dẫn file của mọi người dùng). Chỉ dev/test mới được tắt,
+        // bằng Storage:AllowUnprotectedDataFolder=true (VD biến môi trường Storage__AllowUnprotectedDataFolder=true khi chạy tay).
+        bool allowUnprotected = configuration.GetValue("Storage:AllowUnprotectedDataFolder", false);
+        if (allowUnprotected)
+        {
+            logger.LogWarning("[DB] Storage:AllowUnprotectedDataFolder=true (chế độ dev/test) — thư mục DB có thể KHÔNG được bảo vệ, KHÔNG dùng trên máy thật");
+        }
+
         ResultStore? store = null;
         try
         {
-            store = new ResultStore(dbPath, logger, quota, dataFolderGuard); // [Thay đổi] truyền logger để cảnh báo ACL/PRAGMA; + hạn ngạch job
+            // [Thay đổi] truyền logger để cảnh báo ACL/PRAGMA; + hạn ngạch job. [Thay đổi] M1: + requireProtectedFolder
+            store = new ResultStore(dbPath, logger, quota, dataFolderGuard, requireProtectedFolder: !allowUnprotected);
             logger.LogInformation("Ghi kết quả quét vào {dbPath}", dbPath);
+        }
+        // [Thay đổi] M1: phải đứng TRƯỚC catch (Exception) — nhánh chung "chạy tiếp không có DB". Ở đây DỪNG HẲN service: chạy tiếp thì hoặc lộ
+        // dữ liệu (mở DB không khoá), hoặc DLP mất kết quả mà trông vẫn bình thường. Exit code 1 → systemd hiện "failed" (Restart=on-failure thử lại).
+        catch (DataFolderProtectionException ex)
+        {
+            logger.LogCritical(ex, "[DB] {message}. Service DỪNG để không lộ dữ liệu. Cách sửa: cho tài khoản chạy service làm CHỦ SỞ HỮU thư mục này " +
+                "(Linux: chown + chmod 700; Windows: quyền đổi ACL), hoặc đặt Storage:DbPath sang thư mục riêng trên ổ hỗ trợ phân quyền. " +
+                "Chỉ khi chạy thử: Storage:AllowUnprotectedDataFolder=true", ex.Message);
+            Environment.ExitCode = 1;
+            lifetime?.StopApplication();
+            return;
         }
         catch (Exception ex)
         {

@@ -12,4 +12,7 @@ public sealed class NoOpDataFolderGuard : IDataFolderGuard
 
     /// <inheritdoc/>
     public string Description => "(không khoá)";
+
+    /// <inheritdoc/>
+    public bool Enforces => false; // [Thay đổi] M1
 }

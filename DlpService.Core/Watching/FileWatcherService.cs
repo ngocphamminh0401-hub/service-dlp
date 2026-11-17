@@ -70,7 +70,9 @@ public class FileWatcherService : IDisposable
 
     // [Thay đổi] GĐ3 (3.6): bộ đếm cho metric — chỉ là SỐ, không ghi đường dẫn (R7)
     private long _eventsChanged, _eventsDeleted, _processedFromEvents, _removedRecords, _changedDuringRead;
-    private readonly ConcurrentQueue<double> _latencyMs = new();
+    // [Thay đổi] M3: ConcurrentQueue<double> → histogram bộ nhớ cố định (~1,2 KB). Hàng đợi cũ giữ mọi mẫu cho tới lần ghi metric, mà metric
+    // mặc định TẮT (Windows) → không bao giờ được lấy ra, phình suốt vòng đời service. null = metric tắt → không thu mẫu nào.
+    internal LatencyHistogram? Latency { get; }
 
     /// <summary>Tạo watcher với 1 scanner đã có sẵn rule để dùng khi quét file.</summary>
     /// <param name="scanner">Bộ quét regex, đã nạp rule từ trước.</param>
@@ -98,6 +100,7 @@ public class FileWatcherService : IDisposable
         _logger = logger;
         _store = store;
         _options = options ?? new WatchOptions();
+        Latency = _options.MetricsInterval > TimeSpan.Zero ? new LatencyHistogram() : null; // [Thay đổi] M3
         // [Thay đổi] Tách lõi bước 3: các giá trị mặc định (Router ba vùng, eligibility) giữ nguyên như cũ; relativePathOf = hàm tìm thư mục gốc ở dưới
         _processor = new FileProcessor(_fileReader, scanner, engine, logger,
             routerOptions ?? new RouterOptions(), store, escalation ?? new EscalationOptions(), fileConfidence,
@@ -574,7 +577,7 @@ public class FileWatcherService : IDisposable
             // xếp hàng chung làm p95 độ trễ của cả lượt lên 2,8 s.
             if (!File.Exists(filePath))
             {
-                _latencyMs.Enqueue(Math.Max(0, Stopwatch.GetElapsedTime(eventTimestamp).TotalMilliseconds - DebounceMs));
+                Latency?.Record(Stopwatch.GetElapsedTime(eventTimestamp).TotalMilliseconds - DebounceMs); // [Thay đổi] M3 (âm → 0 trong Record)
                 Interlocked.Increment(ref _processedFromEvents);
                 if (!Directory.Exists(filePath)) RemoveRecords(filePath);
                 return;
@@ -586,7 +589,7 @@ public class FileWatcherService : IDisposable
             try
             {
                 // [Thay đổi] GĐ3 (3.6): độ trễ từ lúc nhận sự kiện tới lúc bắt đầu xử lý, đã trừ debounce
-                _latencyMs.Enqueue(Math.Max(0, Stopwatch.GetElapsedTime(eventTimestamp).TotalMilliseconds - DebounceMs));
+                Latency?.Record(Stopwatch.GetElapsedTime(eventTimestamp).TotalMilliseconds - DebounceMs); // [Thay đổi] M3 (âm → 0 trong Record)
                 Interlocked.Increment(ref _processedFromEvents);
 
                 // [Thay đổi] H2: đến từ sự kiện ghi → bỏ cache tầng 1 (size/mtime trùng không chứng minh "không đổi"), luôn đọc + băm
@@ -691,10 +694,8 @@ public class FileWatcherService : IDisposable
         long processed = Interlocked.Exchange(ref _processedFromEvents, 0);
         long removed = Interlocked.Exchange(ref _removedRecords, 0);
         long retried = Interlocked.Exchange(ref _changedDuringRead, 0);
-        var lat = new List<double>();
-        while (_latencyMs.TryDequeue(out var l)) lat.Add(l);
-        lat.Sort();
-        double P(double q) => lat.Count == 0 ? 0 : lat[Math.Min(lat.Count - 1, (int)Math.Ceiling(q * lat.Count) - 1)];
+        // [Thay đổi] M3: phân vị từ histogram (cận trên của ô, sai số ≤ 10 %) thay cho lấy hết mẫu ra rồi sắp xếp
+        var lat = Latency?.SnapshotAndReset() ?? default;
 
         string watch = "—";
         if (_source is IWatchStatistics s)
@@ -702,7 +703,7 @@ public class FileWatcherService : IDisposable
             watch = $"{s.WatchCount}/{(s.WatchLimit < 0 ? "?" : s.WatchLimit.ToString(System.Globalization.CultureInfo.InvariantCulture))} (lỗi {s.FailedWatchCount}), tràn tổng {s.OverflowCount}, sự kiện thô tổng {s.RawEventCount}";
         }
         _logger.LogInformation("[Metric] {sec:0}s: watch {watch} | sự kiện đổi {changed}, xoá {deleted} → xử lý {processed} | trễ p50 {p50:0} ms, p95 {p95:0} ms, max {max:0} ms | đang chờ {pending}, ghi dở {retried}, xoá bản ghi {removed}",
-            span.TotalSeconds, watch, changed, deleted, processed, P(0.50), P(0.95), lat.Count == 0 ? 0 : lat[^1], _pendingTimers.Count, retried, removed);
+            span.TotalSeconds, watch, changed, deleted, processed, lat.P50, lat.P95, lat.Max, _pendingTimers.Count, retried, removed);
     }
 
     // [Sửa lỗi] Watcher bị GC thu hồi: dừng theo dõi CHỦ ĐỘNG khi service dừng (thay vì chờ GC), huỷ các file đang chờ debounce

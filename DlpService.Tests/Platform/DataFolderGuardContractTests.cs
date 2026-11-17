@@ -45,6 +45,18 @@ public abstract class DataFolderGuardContractTests : IDisposable
         Assert.Null(ex);
     }
 
+    // [Thay đổi] M1: guard phải tự khai đúng mình có khoá thật hay không — ResultStore dựa vào đó để không coi NoOp là "đã bảo vệ"
+    protected virtual bool ExpectedEnforces => true;
+
+    [Fact]
+    public void Enforces_dung_voi_loai_guard()
+    {
+        var guard = Create();
+        if (guard == null) return;
+
+        Assert.Equal(ExpectedEnforces, guard.Enforces);
+    }
+
     [Fact]
     public void Co_mo_ta_de_ghi_log()
     {
@@ -58,6 +70,8 @@ public abstract class DataFolderGuardContractTests : IDisposable
 public class NoOpDataFolderGuardTests : DataFolderGuardContractTests
 {
     protected override IDataFolderGuard? Create() => new NoOpDataFolderGuard();
+
+    protected override bool ExpectedEnforces => false; // [Thay đổi] M1
 }
 
 public class WindowsDataFolderGuardTests : DataFolderGuardContractTests
