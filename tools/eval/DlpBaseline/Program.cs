@@ -189,10 +189,11 @@ internal static class BaselineRunner
         var read = reader.TryReadFile(path);
         double extractMs = sw.Elapsed.TotalMilliseconds;
 
-        if (!read.Success)
+        // [Thay đổi] Lỗi 1: đọc thất bại giờ là Success + IncompleteReason (too_large, extract_failed...) — vẫn tính là "đọc lỗi" như trước
+        if (!read.Success || IncompleteReasons.IsReadFailure(read.IncompleteReason))
         {
             // Service gặp file đọc lỗi thì chỉ ghi cảnh báo, không phân loại -> coi như Public
-            return new FileResult(sample, format, size, false, read.ErrorMessage, SensitivityLevel.Public, false, 0, 0, "", extractMs, 0, 0);
+            return new FileResult(sample, format, size, false, read.ErrorMessage ?? read.Warning, SensitivityLevel.Public, false, 0, 0, "", extractMs, 0, 0);
         }
         string content = read.Content ?? string.Empty;
 

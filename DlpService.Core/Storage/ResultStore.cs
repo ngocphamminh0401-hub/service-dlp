@@ -57,8 +57,9 @@ public sealed record ScanTrace(double S1, double? S2, double SFinal, string Sour
 /// <param name="RulesVer">[Thay đổi] H1: phiên bản bộ rule đã dùng để ra kết luận lần trước (scan_result.rules_ver; rỗng nếu
 /// chưa có scan_result hoặc DB cũ trước khi có cột này).</param>
 /// <param name="ChangeToken">[Thay đổi] H2: dấu thay đổi (IFileChangeToken) lúc quét trước; null = DB cũ / nền tảng không hỗ trợ.</param>
+/// <param name="IncompleteReason">[Thay đổi] Lỗi 1: scan_result.incomplete_reason lần trước (null = đã quét trọn / chưa có kết quả).</param>
 public sealed record FileStateInfo(long Size, long MtimeTicks, string? FileHash, bool HasConclusion, string RulesVer = "",
-    string? ChangeToken = null)
+    string? ChangeToken = null, string? IncompleteReason = null)
 {
     /// <summary>Size và mtime có giống hệt lần quét trước không.</summary>
     public bool SameSizeAndMtime(long size, DateTime mtimeUtc) => Size == size && MtimeTicks == ResultStore.ToTicks(mtimeUtc);
@@ -72,7 +73,9 @@ public sealed record FileStateInfo(long Size, long MtimeTicks, string? FileHash,
     // [Thay đổi] H1: kết luận cũ chỉ dùng lại được khi nó được tính bằng ĐÚNG bộ rule đang chạy. Trước đây chỉ xét
     // HasConclusion → đổi rule + restart thì file không đổi vẫn giữ nhãn của bộ rule cũ mãi mãi.
     /// <summary>Kết luận lần trước dùng lại được cho bộ rule <paramref name="rulesVer"/> không (đã kết luận + cùng rules_ver).</summary>
-    public bool IsReusableFor(string rulesVer) => HasConclusion && RulesVer == rulesVer;
+    // [Thay đổi] Lỗi 1: + kết luận "chưa quét đủ" vì lý do TẠM THỜI (VD đọc quá giờ do máy bận) không được dùng lại → lần sau đọc lại
+    public bool IsReusableFor(string rulesVer) =>
+        HasConclusion && RulesVer == rulesVer && !DlpService.Reading.IncompleteReasons.IsTransient(IncompleteReason);
 }
 
 /// <summary>Kho kết quả quét trên SQLite. An toàn khi nhiều luồng cùng gọi (dùng chung 1 kết nối, có khoá).</summary>
@@ -578,7 +581,8 @@ public sealed partial class ResultStore : IDisposable
             // LEFT JOIN: có file_state nhưng chưa có scan_result → labels_json NULL → HasConclusion = false
             // [Thay đổi] H1: đọc thêm rules_ver (COALESCE vì LEFT JOIN không có scan_result thì NULL)
             cmd.CommandText = """
-                SELECT f.size, f.mtime_utc, f.file_hash, s.labels_json IS NOT NULL, COALESCE(s.rules_ver, ''), f.change_token
+                SELECT f.size, f.mtime_utc, f.file_hash, s.labels_json IS NOT NULL, COALESCE(s.rules_ver, ''), f.change_token,
+                       s.incomplete_reason
                 FROM file_state f LEFT JOIN scan_result s ON s.file_id = f.file_id
                 WHERE f.path = $path;
                 """;
@@ -592,7 +596,8 @@ public sealed partial class ResultStore : IDisposable
 
             return new FileStateInfo(reader.GetInt64(0), reader.GetInt64(1),
                 reader.IsDBNull(2) ? null : reader.GetString(2), reader.GetInt64(3) == 1, reader.GetString(4),
-                reader.IsDBNull(5) ? null : reader.GetString(5)); // [Thay đổi] H2: change_token
+                reader.IsDBNull(5) ? null : reader.GetString(5), // [Thay đổi] H2: change_token
+                reader.IsDBNull(6) ? null : reader.GetString(6)); // [Thay đổi] Lỗi 1: incomplete_reason
         }
     }
 

@@ -195,7 +195,8 @@ internal sealed class SafetyReport
 
         // [Thay đổi] H4: vượt ngân sách giải nén giờ trả Success=true + IncompleteReason=limit_exceeded (để pipeline ghi incomplete, không
         // lọt im lặng) — cũng tính là "bị chặn đúng" vì không có nội dung nào được giải nén/đọc
-        bool rejected = !result.Success || result.IncompleteReason == IncompleteReasons.LimitExceeded;
+        // [Thay đổi] Lỗi 1: + nhóm "đọc thất bại" (too_large, extract_failed, read_timeout...) — trước đây là Success = false
+        bool rejected = !result.Success || result.IncompleteReason == IncompleteReasons.LimitExceeded || IncompleteReasons.IsReadFailure(result.IncompleteReason);
         bool ok = rejected && sw.Elapsed <= maxDuration;
         Check(name, ok, $"Success={result.Success}, chưa đọc hết={result.IncompleteReason ?? "-"}, lý do=\"{result.ErrorMessage ?? result.Warning}\", mất {sw.Elapsed.TotalSeconds:0.00}s (giới hạn {maxDuration.TotalSeconds:0}s)");
     }
@@ -207,7 +208,7 @@ internal sealed class SafetyReport
         var result = reader.TryReadFile(filePath);
         sw.Stop();
 
-        bool ok = result.Success && sw.Elapsed <= maxDuration;
+        bool ok = result.Success && !IncompleteReasons.IsReadFailure(result.IncompleteReason) && sw.Elapsed <= maxDuration; // [Thay đổi] Lỗi 1
         Check(name, ok, $"Success={result.Success}, lý do=\"{result.ErrorMessage}\", mất {sw.Elapsed.TotalSeconds:0.00}s (giới hạn {maxDuration.TotalSeconds:0}s)");
     }
 

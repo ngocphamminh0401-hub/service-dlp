@@ -6,6 +6,7 @@ using System.Reflection;
 using System.Text;
 using DlpService.Platform; // [Thay đổi] Tách lõi bước 4: IPathPolicy
 using DlpService.Reading.Extractors; // [Thay đổi] H4: ExtractionLimitException
+using DlpService.Reading.Native; // [Thay đổi] Lỗi 1: TikaNativeTimeoutException, TikaNativeEncryptedException
 using DlpService.Text;
 
 namespace DlpService.Reading;
@@ -20,7 +21,12 @@ public class FileReaderService
 
     // [Thay đổi] Giới hạn thời gian (Bước 11): 1 file đọc quá lâu (file bất thường, cấu trúc cố tình gây chậm)
     // sẽ bị dừng lại thay vì treo cả luồng quét — kiểm tra sau MỖI block để dừng sớm nhất có thể.
-    private static readonly TimeSpan ExtractionTimeout = TimeSpan.FromSeconds(30);
+    // [Thay đổi] Lỗi 1: hằng → trường (constructor nhận được) để test nhánh quá giờ mà không phải chờ 30 s
+    private static readonly TimeSpan DefaultExtractionTimeout = TimeSpan.FromSeconds(30);
+    private readonly TimeSpan _extractionTimeout;
+
+    // [Thay đổi] Lỗi 1: các đuôi Office Open XML — bản có mật khẩu được Office bọc trong vỏ OLE (luồng EncryptionInfo + EncryptedPackage)
+    private static readonly HashSet<string> OoxmlExtensions = new(StringComparer.OrdinalIgnoreCase) { ".docx", ".xlsx", ".pptx" };
 
     // Bảng tra: đuôi file (viết thường, có dấu chấm) → extractor xử lý đuôi đó
     private readonly Dictionary<string, IContentExtractor> _extractors = new(StringComparer.OrdinalIgnoreCase);
@@ -37,8 +43,10 @@ public class FileReaderService
 
     /// <summary>Tạo service và tự nạp mọi IContentExtractor có trong project (qua reflection).</summary>
     /// <param name="pathPolicy">[Thay đổi] Tách lõi bước 4: quy tắc đường dẫn; null = CaseInsensitivePathPolicy (hành vi Windows như trước đây).</param>
-    public FileReaderService(IPathPolicy? pathPolicy = null)
+    /// <param name="extractionTimeout">[Thay đổi] Lỗi 1: thời gian đọc tối đa 1 file; null = 30 giây.</param>
+    public FileReaderService(IPathPolicy? pathPolicy = null, TimeSpan? extractionTimeout = null)
     {
+        _extractionTimeout = extractionTimeout ?? DefaultExtractionTimeout;
         _pathPolicy = pathPolicy ?? new CaseInsensitivePathPolicy();
         // Tìm mọi class (không abstract) implement IContentExtractor, có constructor không tham số → tạo 1 instance
         // [Thay đổi] Tika native chế độ Replace: tạo instance TRƯỚC rồi mới sắp xếp, vì Priority chỉ biết được sau khi tạo
@@ -147,16 +155,25 @@ public class FileReaderService
             return new FileReadResult { Success = false, ErrorMessage = "Không có quyền đọc file" };
         }
 
+        // [Thay đổi] Lỗi 1: .docx/.xlsx/.pptx mà nội dung là vỏ OLE không phải Word/Excel/PowerPoint cũ → tài liệu Office có mật khẩu.
+        // Trước đây đưa cho OpenXml → ném lỗi → Success = false → KHÔNG ghi DB (đặt mật khẩu là né được DLP). Kết luận luôn, không đọc thử.
+        if (detected == DetectedFormat.OtherOle && OoxmlExtensions.Contains(Path.GetExtension(filePath)))
+        {
+            return Incomplete(IncompleteReasons.Encrypted, "Tài liệu Office có mật khẩu (vỏ OLE mã hoá) — chưa quét được");
+        }
+
         extractor = ResolveByContent(Path.GetExtension(filePath), extractor, detected, out string? mismatchWarning, out string? contentError)!;
         if (contentError != null)
         {
-            return new FileReadResult { Success = false, ErrorMessage = contentError };
+            // [Thay đổi] Lỗi 1: trước đây Success = false → file không có bản ghi. Giờ: không đọc rác (nội dung rỗng) nhưng GHI NHẬN là chưa quét.
+            return Incomplete(IncompleteReasons.UnsupportedFormat, contentError);
         }
 
         var fileInfo = new FileInfo(filePath);
         if (fileInfo.Length > extractor.MaxFileSizeBytes)
         {
-            return new FileReadResult { Success = false, ErrorMessage = $"File quá lớn (> {extractor.MaxFileSizeBytes / 1024 / 1024}MB)" };
+            // [Thay đổi] Lỗi 1: trước đây Success = false → đệm file .txt lên 11 MB là lọt hẳn khỏi DLP. Giờ ghi incomplete (không mở file).
+            return Incomplete(IncompleteReasons.TooLarge, $"File quá lớn (> {extractor.MaxFileSizeBytes / 1024 / 1024}MB) — chưa quét");
         }
 
         // [Thay đổi] Streaming (Bước 2): ghép dần từng ContentBlock vào buffer và DỪNG NGAY khi đủ MaxExtractedChars,
@@ -164,14 +181,19 @@ public class FileReaderService
         var sb = new StringBuilder();
         bool truncated = false;
         int unreadableBlocks = 0; // [Thay đổi] H3: số khối Unreadable (VD trang PDF scan)
+        // [Thay đổi] Lỗi 1: đọc dở vì quá giờ / lỗi thư viện → KHÔNG bỏ phần đã đọc: vẫn quét, ghi incomplete với lý do này
+        string? failureReason = null, failureWarning = null;
         var timeoutWatch = Stopwatch.StartNew();
         try
         {
             foreach (var block in extractor.Extract(filePath))
             {
-                if (timeoutWatch.Elapsed > ExtractionTimeout)
+                if (timeoutWatch.Elapsed > _extractionTimeout)
                 {
-                    return new FileReadResult { Success = false, ErrorMessage = $"Đọc file quá {ExtractionTimeout.TotalSeconds:0}s (nghi ngờ file bất thường)" };
+                    // [Thay đổi] Lỗi 1: trước đây trả Success = false (bỏ cả phần đã đọc, không ghi DB)
+                    failureReason = IncompleteReasons.ReadTimeout;
+                    failureWarning = $"Đọc file quá {_extractionTimeout.TotalSeconds:0}s (nghi ngờ file bất thường) — chỉ quét phần đã đọc";
+                    break;
                 }
 
                 // [Thay đổi] H3: khối đánh dấu "có nội dung nhưng không đọc được chữ" — chỉ đếm, không đem Text đi quét
@@ -216,6 +238,7 @@ public class FileReaderService
                 IncompleteReason = IncompleteReasons.LimitExceeded
             };
         }
+        // Lỗi TẠM THỜI (file đang bị khoá / thiếu quyền) → giữ Failed: không ghi DB, lần sau thử lại (không phải đặc điểm của file)
         catch (IOException)
         {
             return new FileReadResult { Success = false, ErrorMessage = "File đang bị khóa" };
@@ -224,14 +247,26 @@ public class FileReaderService
         {
             return new FileReadResult { Success = false, ErrorMessage = "Không có quyền đọc file" };
         }
+        // [Thay đổi] Lỗi 1: 3 nhánh dưới trước đây đều Success = false → file không có bản ghi, lọt khỏi kết quả DLP. Giờ ghi incomplete
+        // (Unknown + needs_review), phần đọc được trước khi lỗi vẫn được quét. Chỉ ghi TÊN loại lỗi, không ghi ex.Message (có thể chứa nội dung).
+        catch (TikaNativeTimeoutException)
+        {
+            failureReason = IncompleteReasons.ReadTimeout;
+            failureWarning = "Tika đọc file quá thời gian — chỉ quét phần đã đọc";
+        }
+        catch (Exception ex) when (ex is TikaNativeEncryptedException or UglyToad.PdfPig.Exceptions.PdfDocumentEncryptedException)
+        {
+            failureReason = IncompleteReasons.Encrypted;
+            failureWarning = "File có mật khẩu — chưa quét được";
+        }
         catch (Exception ex)
         {
             // [Thay đổi] Mở rộng định dạng: thư viện đọc docx/xlsx/pdf ném đủ loại exception riêng khi file hỏng,
             // có mật khẩu, sai định dạng thật (đổi đuôi)... — bắt hết để 1 file lỗi không làm hỏng luồng xử lý.
             // Vì Extract() dùng yield return, exception có thể chỉ lộ ra khi foreach ở trên duyệt tới phần tử lỗi,
             // không nhất thiết ngay dòng đầu — nhưng vẫn bắt được ở đây vì catch bọc quanh cả vòng lặp.
-            // Chỉ ghi TÊN loại lỗi, không ghi ex.Message (có thể chứa trích đoạn nội dung file).
-            return new FileReadResult { Success = false, ErrorMessage = $"Không trích xuất được nội dung ({ex.GetType().Name}) — file hỏng, có mật khẩu hoặc sai định dạng" };
+            failureReason = IncompleteReasons.ExtractFailed;
+            failureWarning = $"Không trích xuất được nội dung ({ex.GetType().Name}) — file hỏng, có mật khẩu hoặc sai định dạng; chỉ quét phần đã đọc";
         }
 
         string content = sb.ToString();
@@ -243,7 +278,17 @@ public class FileReaderService
         string? warning = null;
         bool needsOcr = false;
         string? incompleteReason = null; // [Thay đổi] H3: cờ "đọc chưa hết" (trước đây chỉ có chuỗi Warning, pipeline không dựa vào được)
-        if (truncated || content.Length > MaxExtractedChars)
+        if (failureReason != null)
+        {
+            // [Thay đổi] Lỗi 1: đọc dở vì quá giờ / lỗi → lý do này đứng TRƯỚC truncated/needs_ocr (file rỗng vì lỗi KHÔNG phải "cần OCR")
+            warning = failureWarning;
+            incompleteReason = failureReason;
+            if (content.Length > MaxExtractedChars)
+            {
+                content = content[..MaxExtractedChars];
+            }
+        }
+        else if (truncated || content.Length > MaxExtractedChars)
         {
             warning = $"Nội dung dài, chỉ quét {MaxExtractedChars:N0} ký tự đầu";
             incompleteReason = IncompleteReasons.Truncated;
@@ -276,6 +321,11 @@ public class FileReaderService
 
         return new FileReadResult { Success = true, Content = content, Warning = warning, NeedsOcr = needsOcr, IncompleteReason = incompleteReason };
     }
+
+    // [Thay đổi] Lỗi 1: kết quả "đọc được 0 ký tự, chưa quét" — cùng mẫu với nhánh ExtractionLimitException (H4). Pipeline (H3) ghi
+    // incomplete + Unknown + needs_review thay vì bỏ file. warning chỉ chứa loại lỗi + con số, không có nội dung file.
+    private static FileReadResult Incomplete(string reason, string warning) =>
+        new() { Success = true, Content = string.Empty, Warning = warning, IncompleteReason = reason };
 
     // [Thay đổi] Magic bytes: các đuôi là văn bản thuần — nội dung "Text" ở đây là đúng loại, không phải đổi đuôi
     private static readonly HashSet<string> PlainTextExtensions = new(StringComparer.OrdinalIgnoreCase) { ".txt", ".csv", ".eml" };
@@ -381,4 +431,30 @@ public static class IncompleteReasons
 
     /// <summary>Hết ngân sách thời gian quét của cả file (Scan:MaxSecondsPerFile) — các rule còn lại chưa chạy.</summary>
     public const string ScanBudget = "scan_budget";
+
+    // [Thay đổi] Lỗi 1: các kiểu "đọc thất bại" trước đây trả Success = false (file không có bản ghi DB, lọt khỏi DLP)
+    /// <summary>File vượt kích thước tối đa của bộ đọc — không mở để đọc.</summary>
+    public const string TooLarge = "too_large";
+
+    /// <summary>Định dạng thật chưa hỗ trợ (VD zip/OLE mang đuôi văn bản, .doc khi chưa bật Tika).</summary>
+    public const string UnsupportedFormat = "unsupported_format";
+
+    /// <summary>File có mật khẩu.</summary>
+    public const string Encrypted = "encrypted";
+
+    /// <summary>Đọc quá thời gian cho phép — chỉ quét phần đã đọc. Có thể chỉ do máy bận → lần sau đọc lại (xem <see cref="IsTransient"/>).</summary>
+    public const string ReadTimeout = "read_timeout";
+
+    /// <summary>Thư viện đọc ném lỗi (file hỏng, sai cấu trúc...) — chỉ quét phần đã đọc.</summary>
+    public const string ExtractFailed = "extract_failed";
+
+    // [Thay đổi] Lỗi 1: lý do có thể chỉ là TẠM THỜI (máy bận) → cache không dùng lại kết luận, lần sau đọc lại. Lỗi 3 sẽ thêm scan_budget/regex_timeout.
+    /// <summary>true nếu lý do incomplete có thể tự hết khi thử lại (không được giữ trong cache).</summary>
+    public static bool IsTransient(string? reason) => reason == ReadTimeout;
+
+    // [Thay đổi] Lỗi 1: cho các tool đo đếm (DlpBaseline, DlpSizeBench, DlpExtractorSafety) — những lý do trước Lỗi 1 là "Success = false",
+    // để số liệu đánh giá không đổi nghĩa. Service KHÔNG dùng hàm này (với service đây là kết quả incomplete bình thường).
+    /// <summary>true nếu lý do thuộc nhóm "đọc thất bại" (trước Lỗi 1 trả Success = false).</summary>
+    public static bool IsReadFailure(string? reason) =>
+        reason is TooLarge or UnsupportedFormat or Encrypted or ReadTimeout or ExtractFailed;
 }

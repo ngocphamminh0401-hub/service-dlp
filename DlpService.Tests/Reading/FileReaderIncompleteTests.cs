@@ -105,4 +105,46 @@ public sealed class FileReaderIncompleteTests : IDisposable
 
         Assert.True(r.IsComplete);
     }
+
+    // ===== [Thay đổi] Lỗi 1 =====
+
+    [Fact]
+    public void Loi1_Docx_la_vo_OLE_thi_encrypted_khong_doc_thu()
+    {
+        // Office mã hoá .docx bằng cách bọc trong vỏ OLE (EncryptionInfo + EncryptedPackage) → sniffer ra OtherOle
+        string path = Path.Combine(_work, "mat-khau.docx");
+        byte[] ole = new byte[4096];
+        new byte[] { 0xD0, 0xCF, 0x11, 0xE0, 0xA1, 0xB1, 0x1A, 0xE1 }.CopyTo(ole, 0);
+        File.WriteAllBytes(path, ole);
+
+        var r = _reader.TryReadFile(path);
+
+        Assert.True(r.Success); // trước Lỗi 1: Success = false → không có bản ghi DB
+        Assert.Equal(IncompleteReasons.Encrypted, r.IncompleteReason);
+        Assert.Equal(string.Empty, r.Content);
+        Assert.False(r.NeedsOcr);
+    }
+
+    [Fact]
+    public void Loi1_Qua_gio_tra_Success_read_timeout_khong_phai_needs_ocr()
+    {
+        string path = Path.Combine(_work, "cham.txt");
+        File.WriteAllText(path, "dong 1\ndong 2\ndong 3");
+
+        var r = new FileReaderService(extractionTimeout: TimeSpan.FromTicks(1)).TryReadFile(path);
+
+        Assert.True(r.Success);
+        Assert.Equal(IncompleteReasons.ReadTimeout, r.IncompleteReason);
+        Assert.False(r.NeedsOcr); // nội dung rỗng vì quá giờ, KHÔNG phải vì là ảnh scan
+        Assert.True(IncompleteReasons.IsTransient(r.IncompleteReason));
+    }
+
+    [Fact]
+    public void Loi1_Chi_read_timeout_la_tam_thoi()
+    {
+        Assert.False(IncompleteReasons.IsTransient(IncompleteReasons.TooLarge));
+        Assert.False(IncompleteReasons.IsTransient(IncompleteReasons.ExtractFailed));
+        Assert.False(IncompleteReasons.IsTransient(IncompleteReasons.Truncated));
+        Assert.False(IncompleteReasons.IsTransient(null));
+    }
 }

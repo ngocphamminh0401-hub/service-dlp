@@ -34,7 +34,8 @@ public sealed class FileProcessorIncompleteTests : IDisposable
     }
 
     // [Thay đổi] M4: + validatorSleepMs (mô phỏng mỗi chỗ khớp tốn thời gian), maxScanTime, rulesVer
-    private FileProcessor Processor(int validatorSleepMs = 0, TimeSpan? maxScanTime = null, string rulesVer = "rv1")
+    // [Thay đổi] Lỗi 1: + readTimeout (thời gian đọc tối đa của FileReaderService; null = 30 s)
+    private FileProcessor Processor(int validatorSleepMs = 0, TimeSpan? maxScanTime = null, string rulesVer = "rv1", TimeSpan? readTimeout = null)
     {
         var cccd = new SensitivePattern
         {
@@ -47,7 +48,7 @@ public sealed class FileProcessorIncompleteTests : IDisposable
             Validator = validatorSleepMs > 0 ? _ => { Thread.Sleep(validatorSleepMs); return true; } : null
         };
         IPathPolicy policy = new CaseInsensitivePathPolicy();
-        return new FileProcessor(new FileReaderService(policy), new RegexScanner([cccd], rulesVer, maxScanTime: maxScanTime),
+        return new FileProcessor(new FileReaderService(policy, readTimeout), new RegexScanner([cccd], rulesVer, maxScanTime: maxScanTime),
             new ClassificationEngine(NullLogger.Instance),
             NullLogger.Instance, new RouterOptions(), _store, new EscalationOptions(), fileConfidence: null, Path.GetFileName, policy);
     }
@@ -245,5 +246,73 @@ public sealed class FileProcessorIncompleteTests : IDisposable
             "{\"level\":\"Unknown\"}", [], IncompleteReason: IncompleteReasons.Truncated));
 
         Assert.True(store.TryGetFileState("/x.txt")!.HasConclusion);
+    }
+
+    // ===== [Thay đổi] Lỗi 1: file đọc thất bại trước đây trả Failed, KHÔNG có bản ghi DB (lọt khỏi kết quả DLP) =====
+
+    [Fact]
+    public void Loi1_File_qua_lon_co_ban_ghi_incomplete_Unknown_va_duoc_cache()
+    {
+        string file = Path.Combine(_work, "dem-cho-qua-lon.txt");
+        using (var f = File.Create(file)) f.SetLength(10L * 1024 * 1024 + 1); // > 10 MB của TxtExtractor
+
+        Assert.Equal(ProcessOutcome.Scanned, Processor().ProcessFile(file)); // trước Lỗi 1: Failed
+
+        Assert.Equal(ResultStore.StatusIncomplete, Col(file, "status"));
+        Assert.Equal(IncompleteReasons.TooLarge, Col(file, "incomplete_reason"));
+        Assert.Contains("\"Unknown\"", Col(file, "labels_json"));
+        Assert.Equal("1", Col(file, "needs_review"));
+        Assert.Equal("0", Col(file, "jobs"));
+
+        // Lỗi không tạm thời → có cache: lượt đối soát sau (processor mới = restart) bỏ qua, không mở lại file
+        Assert.Equal(ProcessOutcome.Unchanged, Processor().ProcessFile(file));
+    }
+
+    [Fact]
+    public void Loi1_Doc_qua_gio_ghi_incomplete_va_lan_sau_duoc_doc_lai()
+    {
+        string file = Write("cham.txt", "CCCD " + Cccd);
+
+        // Máy bận: đọc quá giờ ngay khối đầu
+        Assert.Equal(ProcessOutcome.Scanned, Processor(readTimeout: TimeSpan.FromTicks(1)).ProcessFile(file));
+        Assert.Equal(ResultStore.StatusIncomplete, Col(file, "status"));
+        Assert.Equal(IncompleteReasons.ReadTimeout, Col(file, "incomplete_reason"));
+        Assert.Equal(IncompleteReasons.ReadTimeout, _store.TryGetFileState(file)!.IncompleteReason);
+
+        // Lượt sau (size/mtime không đổi): read_timeout là lỗi TẠM THỜI → không dùng cache, đọc lại → đọc trọn → kết luận thật
+        Assert.Equal(ProcessOutcome.Scanned, Processor().ProcessFile(file));
+        Assert.Equal(ResultStore.StatusFinal, Col(file, "status"));
+        Assert.Null(_store.TryGetFileState(file)!.IncompleteReason);
+        Assert.DoesNotContain("\"Unknown\"", Col(file, "labels_json"));
+    }
+
+    [Fact]
+    public void Loi1_Zip_doi_duoi_txt_va_docx_hong_deu_co_ban_ghi_incomplete()
+    {
+        string zip = Path.Combine(_work, "giau.txt");
+        using (var archive = System.IO.Compression.ZipFile.Open(zip, System.IO.Compression.ZipArchiveMode.Create))
+        {
+            using var w = new StreamWriter(archive.CreateEntry("cccd.txt").Open());
+            w.Write("CCCD " + Cccd);
+        }
+        string broken = Path.Combine(_work, "hong.docx");
+        File.WriteAllBytes(broken, [.. "PK\u0003\u0004"u8.ToArray(), .. Enumerable.Repeat((byte)0x41, 4096)]);
+
+        var processor = Processor();
+        Assert.Equal(ProcessOutcome.Scanned, processor.ProcessFile(zip));
+        Assert.Equal(ProcessOutcome.Scanned, processor.ProcessFile(broken));
+
+        Assert.Equal(IncompleteReasons.UnsupportedFormat, Col(zip, "incomplete_reason"));
+        Assert.Equal(IncompleteReasons.ExtractFailed, Col(broken, "incomplete_reason"));
+        Assert.Equal(ResultStore.StatusIncomplete, Col(broken, "status"));
+    }
+
+    [Fact]
+    public void Loi1_File_khong_ton_tai_van_la_Failed_khong_ghi_DB()
+    {
+        string file = Path.Combine(_work, "khong-co.txt");
+
+        Assert.Equal(ProcessOutcome.Failed, Processor().ProcessFile(file));
+        Assert.Null(_store.TryGetFileState(file));
     }
 }

@@ -122,7 +122,7 @@ public sealed class FileProcessor
             _logger.LogDebug("[FileWatcher] {filePath}: không đổi (size/mtime/dấu thay đổi), bỏ qua", filePath);
             return ProcessOutcome.Unchanged;
         }
-        if (cached is { HasConclusion: true } && !reusable)
+        if (cached is { HasConclusion: true } && !reusable && cached.RulesVer != _scanner.RulesVer) // [Thay đổi] Lỗi 1: không log nhầm khi chỉ là thử lại sau read_timeout
         {
             // [Thay đổi] H1: chỉ log 8 ký tự đầu của version (mã băm bộ rule, không phải dữ liệu file)
             _logger.LogDebug("[FileWatcher] {filePath}: bộ rule đã đổi ({old} → {current}), quét lại",
@@ -176,7 +176,8 @@ public sealed class FileProcessor
             _lastContentHash[filePath] = hash;
 
             // [Thay đổi] H1: quét lại CÙNG nội dung chỉ vì bộ rule đổi → sau khi lưu phải merge lại verdict LLM cũ (nếu có)
-            bool rescanForRules = cached is { HasConclusion: true } && !reusable && cached.FileHash == hash;
+            // [Thay đổi] Lỗi 1: + bộ rule THẬT SỰ khác — "không dùng lại" còn có thể do lần trước đọc quá giờ (thử lại), không phải do đổi rule
+            bool rescanForRules = cached is { HasConclusion: true } && !reusable && cached.FileHash == hash && cached.RulesVer != _scanner.RulesVer;
 
             // [Thay đổi] H3: đọc chưa hết (bị cắt / cần OCR / trang scan) → mọi nhánh bên dưới KHÔNG được kết luận "final": status =
             // incomplete, needs_review, không gửi LLM; không match thì mức Unknown thay vì Public. Lấy 1 lần ở đây, 2 nhánh dùng chung.

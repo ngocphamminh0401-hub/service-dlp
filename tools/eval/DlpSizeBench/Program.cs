@@ -141,7 +141,8 @@ internal static class Bench
                 var r = samples[i];
                 string src = Path.Combine(rawdata, $"{r["domain"]}__{r["label"]}", $"{r["id"]}.docx");
                 var read = reader.TryReadFile(src);
-                if (!read.Success) { Console.WriteLine($"  bỏ {src}: {read.ErrorMessage}"); continue; }
+                // [Thay đổi] Lỗi 1: + nhóm lý do "đọc thất bại" (trước đây Success = false)
+                if (!read.Success || IncompleteReasons.IsReadFailure(read.IncompleteReason)) { Console.WriteLine($"  bỏ {src}: {read.ErrorMessage ?? read.Warning}"); continue; }
                 var orig = (read.Content ?? "").Split('\n').Select(l => l.TrimEnd('\r')).Where(l => l.Trim().Length > 0).ToList();
                 int origChars = orig.Sum(l => l.Length + 1);
 
@@ -269,10 +270,10 @@ internal static class Bench
             var read = reader.TryReadFile(path);
             double extract = t.Elapsed.TotalMilliseconds;
             var truth = Enum.Parse<SensitivityLevel>(m["truth"]);
-            if (!read.Success)
+            if (!read.Success || IncompleteReasons.IsReadFailure(read.IncompleteReason)) // [Thay đổi] Lỗi 1
             {
                 proc.Refresh();
-                return new Result(m, false, read.ErrorMessage, read.Warning, 0, 0, truth, SensitivityLevel.Public, extract, 0, 0,
+                return new Result(m, false, read.ErrorMessage ?? read.Warning, read.Warning, 0, 0, truth, SensitivityLevel.Public, extract, 0, 0,
                     (GC.GetTotalAllocatedBytes(false) - alloc0) / 1048576.0, proc.WorkingSet64 / 1048576.0);
             }
             string content = read.Content ?? "";

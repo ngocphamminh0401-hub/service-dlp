@@ -105,8 +105,11 @@ public sealed class FileTypeSnifferTests : IDisposable
     {
         var result = new FileReaderService().TryReadFile(WriteZip("dulieu.txt"));
 
-        Assert.False(result.Success);
-        Assert.Contains("zip", result.ErrorMessage);
+        // [Thay đổi] Lỗi 1: vẫn KHÔNG đọc rác (nội dung rỗng), nhưng giờ ghi nhận "chưa quét" (Success + unsupported_format) thay vì Success = false
+        Assert.True(result.Success);
+        Assert.Equal(string.Empty, result.Content);
+        Assert.Equal(IncompleteReasons.UnsupportedFormat, result.IncompleteReason);
+        Assert.Contains("zip", result.Warning);
     }
 
     [Fact]
