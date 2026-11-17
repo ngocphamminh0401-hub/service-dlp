@@ -17,7 +17,21 @@ public class CsvExtractor : IContentExtractor
     /// <inheritdoc/>
     public IEnumerable<ContentBlock> Extract(string filePath)
     {
-        string text = TextFileReader.ReadAll(filePath);
+        // [Thay đổi] M6: mở file rồi dùng chung đường đọc Stream (attachment trong email đi cùng đường này)
+        using var stream = ExtractorHelpers.OpenShared(filePath);
+        foreach (var block in Extract(stream, Path.GetFileName(filePath)))
+        {
+            yield return block;
+        }
+    }
+
+    /// <inheritdoc/>
+    public bool SupportsStream => true; // [Thay đổi] M6
+
+    /// <inheritdoc/>
+    public IEnumerable<ContentBlock> Extract(Stream stream, string fileName)
+    {
+        string text = TextFileReader.ReadAll(stream);
         var lines = text.Split(["\r\n", "\n"], StringSplitOptions.None);
 
         IReadOnlyList<string>? columnNames = null;

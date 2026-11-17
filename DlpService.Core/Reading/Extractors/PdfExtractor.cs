@@ -19,7 +19,21 @@ public class PdfExtractor : IContentExtractor
     /// <inheritdoc/>
     public IEnumerable<ContentBlock> Extract(string filePath)
     {
+        // [Thay đổi] M6: mở file rồi dùng chung đường đọc Stream (attachment trong email đi CÙNG đường này) → hành vi file thường không đổi
         using var stream = ExtractorHelpers.OpenShared(filePath);
+        foreach (var block in Extract(stream, Path.GetFileName(filePath)))
+        {
+            yield return block;
+        }
+    }
+
+    // [Thay đổi] M6: đọc từ Stream (attachment email giải mã trong bộ nhớ — KHÔNG ghi file tạm ra đĩa). Stream phải seek được.
+    /// <inheritdoc/>
+    public bool SupportsStream => true;
+
+    /// <inheritdoc/>
+    public IEnumerable<ContentBlock> Extract(Stream stream, string fileName)
+    {
         // PDF có mật khẩu mở file → PdfPig ném exception, FileReaderService bắt và báo "có mật khẩu"
         using var document = PdfDocument.Open(stream);
 

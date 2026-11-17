@@ -1,0 +1,7 @@
+Heading | Header | Subject: Dai tiep
+Heading | Header | From: An
+Heading | Header | To: a@vd.vn, b@vd.vn, c@vd.vn
+Heading | Header | Cc: d@vd.vn
+Heading | Header | Bcc: e@vd.vn
+Paragraph | Body | Than
+Paragraph | Body | 

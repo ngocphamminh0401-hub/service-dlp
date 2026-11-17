@@ -50,12 +50,24 @@ public class FileReaderService
             .OrderByDescending(e => e.Priority)
             .ThenBy(e => e.GetType().FullName); // thứ tự cố định: trùng đuôi thì luôn cùng 1 bên thắng
 
-        foreach (var extractor in extractors)
+        // [Thay đổi] M6: bảng thứ 2 chỉ gồm extractor ĐỌC ĐƯỢC TỪ STREAM — dùng cho attachment trong email (đọc trong bộ nhớ). Tách riêng vì khi
+        // Tika native chế độ Replace thắng 1 đuôi (VD .docx) mà Tika chỉ nhận đường dẫn, attachment phải lùi về bộ đọc kế tiếp hỗ trợ Stream.
+        var streamExtractors = new Dictionary<string, IContentExtractor>(StringComparer.OrdinalIgnoreCase);
+        var all = extractors.ToList();
+        foreach (var extractor in all)
         {
             foreach (var extension in extractor.Extensions)
             {
                 _extractors.TryAdd(extension, extractor); // trùng đuôi: giữ extractor nạp trước
+                if (extractor.SupportsStream)
+                {
+                    streamExtractors.TryAdd(extension, extractor);
+                }
             }
+        }
+        foreach (var extractor in all.OfType<IUsesExtractorLookup>())
+        {
+            extractor.SetLookup(ext => streamExtractors.TryGetValue(ext, out var x) ? x : null);
         }
     }
 

@@ -1,0 +1,7 @@
+Heading | Header | Subject: Bao cao
+Heading | Header | From: An <an@vd.vn>
+Heading | Header | To: Binh <binh@vd.vn>
+Heading | Header | Date: Mon, 16 Nov 2026 08:00:00 +0700
+Paragraph | Body | Dong 1
+Paragraph | Body | CCCD 001099012345
+Paragraph | Body | 

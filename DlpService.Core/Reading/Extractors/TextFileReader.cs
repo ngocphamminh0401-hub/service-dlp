@@ -10,9 +10,15 @@ internal static class TextFileReader
     /// <param name="filePath">Đường dẫn file text.</param>
     public static string ReadAll(string filePath)
     {
+        using var stream = ExtractorHelpers.OpenShared(filePath); // [Thay đổi] Bước 2: dùng hàm mở file chung
+        return ReadAll(stream); // [Thay đổi] M6: dùng chung bản Stream
+    }
+
+    /// <summary>[Thay đổi] M6: như bản đường dẫn nhưng đọc từ Stream (attachment email trong bộ nhớ).</summary>
+    public static string ReadAll(Stream stream)
+    {
         // Đọc hết byte 1 lần, rồi mới giải mã — để thử lại encoding khác mà không phải mở file lần 2
         byte[] bytes;
-        using (var stream = ExtractorHelpers.OpenShared(filePath)) // [Thay đổi] Bước 2: dùng hàm mở file chung
         using (var memory = new MemoryStream())
         {
             stream.CopyTo(memory);

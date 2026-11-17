@@ -168,6 +168,49 @@ public sealed class FileProcessorIncompleteTests : IDisposable
         Assert.Equal(ProcessOutcome.Scanned, Processor(20, budget, rulesVer: "rv2").ProcessFile(file)); // rule đổi → quét lại (H1)
     }
 
+    // [Thay đổi] M6: email kèm .docx chứa CCCD — trước M6 attachment bị bỏ im lặng → Public/final
+    [Fact]
+    public void Email_kem_docx_chua_CCCD_khong_con_la_Public()
+    {
+        byte[] docx = DlpService.Tests.Reading.EmlAttachmentTests.Docx("So CCCD " + Cccd);
+        string file = Write("thu.eml", "Subject: Gui ho so\r\nContent-Type: multipart/mixed; boundary=B\r\n\r\n" +
+            "--B\r\nContent-Type: text/plain\r\n\r\nAnh xem file\r\n" +
+            "--B\r\nContent-Type: application/vnd.openxmlformats-officedocument.wordprocessingml.document; name=\"hs.docx\"\r\n" +
+            "Content-Disposition: attachment; filename=\"hs.docx\"\r\nContent-Transfer-Encoding: base64\r\n\r\n" +
+            Convert.ToBase64String(docx, Base64FormattingOptions.InsertLineBreaks) + "\r\n--B--\r\n");
+
+        Assert.Equal(ProcessOutcome.Scanned, Processor().ProcessFile(file));
+
+        string labels = Col(file, "labels_json")!;
+        Assert.DoesNotContain("\"Public\"", labels);
+        Assert.DoesNotContain("\"Unknown\"", labels);
+        Assert.Equal(ResultStore.StatusFinal, Col(file, "status")); // đọc trọn (attachment đọc được) → kết luận được
+    }
+
+    // [Thay đổi] Điểm A–D: CCCD giấu ở chỗ trình đọc email KHÔNG hiển thị / parser cũ bỏ qua → trước đây Public/final
+    public static TheoryData<string, string> HiddenInEml => new()
+    {
+        { "A_thieu_dong_dong", "Subject: A\r\nContent-Type: multipart/mixed; boundary=MB\r\n\r\n--MB\r\nContent-Type: text/plain\r\n\r\nPhan 1\r\n" +
+                               "--MB\r\nContent-Type: text/plain\r\n\r\nCCCD " + Cccd + "\r\n" },
+        { "B_khong_co_marker", "Subject: B\r\nContent-Type: multipart/mixed; boundary=XX\r\n\r\nCCCD " + Cccd + "\r\n" },
+        { "C_khong_co_boundary", "Subject: C\r\nContent-Type: multipart/mixed\r\n\r\nCCCD " + Cccd + "\r\n" },
+        { "D_preamble", "Subject: D\r\nContent-Type: multipart/mixed; boundary=PE\r\n\r\nCCCD " + Cccd + "\r\n--PE\r\nContent-Type: text/plain\r\n\r\nThan\r\n--PE--\r\n" },
+        { "D_epilogue", "Subject: D\r\nContent-Type: multipart/mixed; boundary=PE\r\n\r\n--PE\r\nContent-Type: text/plain\r\n\r\nThan\r\n--PE--\r\nCCCD " + Cccd + "\r\n" },
+    };
+
+    [Theory]
+    [MemberData(nameof(HiddenInEml))]
+    public void CCCD_giau_trong_cau_truc_email_van_bi_phat_hien(string name, string eml)
+    {
+        string file = Write(name + ".eml", eml);
+
+        Assert.Equal(ProcessOutcome.Scanned, Processor().ProcessFile(file));
+
+        string labels = Col(file, "labels_json")!;
+        Assert.DoesNotContain("\"Public\"", labels);
+        Assert.DoesNotContain("\"Unknown\"", labels);
+    }
+
     [Fact]
     public void Unknown_nho_hon_Public_va_khong_doi_gia_tri_mac_dinh()
     {

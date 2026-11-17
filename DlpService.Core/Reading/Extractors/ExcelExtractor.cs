@@ -19,9 +19,23 @@ public class ExcelExtractor : IContentExtractor
     /// <inheritdoc/>
     public IEnumerable<ContentBlock> Extract(string filePath)
     {
+        // [Thay đổi] M6: mở file rồi dùng chung đường đọc Stream (attachment trong email đi CÙNG đường này) → hành vi file thường không đổi
+        using var stream = ExtractorHelpers.OpenShared(filePath);
+        foreach (var block in Extract(stream, Path.GetFileName(filePath)))
+        {
+            yield return block;
+        }
+    }
+
+    // [Thay đổi] M6: đọc từ Stream (attachment email giải mã trong bộ nhớ — KHÔNG ghi file tạm ra đĩa). Stream phải seek được.
+    /// <inheritdoc/>
+    public bool SupportsStream => true;
+
+    /// <inheritdoc/>
+    public IEnumerable<ContentBlock> Extract(Stream stream, string fileName)
+    {
         // [Thay đổi] H4: kiểm ngân sách trên chính stream sẽ đọc. Ngân sách Streaming: ExcelDataReader đọc sheet theo từng hàng (sheet lớn
         // được phép hơn docx), riêng sharedStrings.xml bị nạp hết vào RAM nên có ngưỡng riêng. .xls nhị phân cũ không phải ZIP → tự bỏ qua.
-        using var stream = ExtractorHelpers.OpenShared(filePath);
         ZipLimits.EnsureWithin(stream, ZipLimits.Streaming);
         // CreateReader tự nhận ra .xlsx (OpenXML) hay .xls (BIFF nhị phân) theo NỘI DUNG file, không theo đuôi.
         // File .xls cần bảng mã Windows — đã đăng ký CodePagesEncodingProvider ở FileReaderService.

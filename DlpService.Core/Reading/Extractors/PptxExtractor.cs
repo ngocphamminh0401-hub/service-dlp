@@ -22,8 +22,22 @@ public class PptxExtractor : IContentExtractor
     /// <inheritdoc/>
     public IEnumerable<ContentBlock> Extract(string filePath)
     {
-        // [Thay đổi] H4: kiểm ngân sách trên chính stream sẽ đọc; pptx cũng nạp DOM (slidePart.Slide) → ngân sách Dom
+        // [Thay đổi] M6: mở file rồi dùng chung đường đọc Stream (attachment trong email đi CÙNG đường này) → hành vi file thường không đổi
         using var stream = ExtractorHelpers.OpenShared(filePath);
+        foreach (var block in Extract(stream, Path.GetFileName(filePath)))
+        {
+            yield return block;
+        }
+    }
+
+    // [Thay đổi] M6: đọc từ Stream (attachment email giải mã trong bộ nhớ — KHÔNG ghi file tạm ra đĩa). Stream phải seek được.
+    /// <inheritdoc/>
+    public bool SupportsStream => true;
+
+    /// <inheritdoc/>
+    public IEnumerable<ContentBlock> Extract(Stream stream, string fileName)
+    {
+        // [Thay đổi] H4: kiểm ngân sách trên chính stream sẽ đọc; pptx cũng nạp DOM (slidePart.Slide) → ngân sách Dom
         ZipLimits.EnsureWithin(stream, ZipLimits.Dom);
         using var document = PresentationDocument.Open(stream, isEditable: false);
         var presentation = document.PresentationPart ?? throw new InvalidDataException("File .pptx không có phần trình chiếu");

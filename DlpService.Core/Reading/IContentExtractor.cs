@@ -66,4 +66,22 @@ public interface IContentExtractor
     /// exception có thể chỉ được ném ra khi bên gọi duyệt (foreach) tới phần tử gây lỗi, không phải ngay lúc gọi hàm.</summary>
     /// <param name="filePath">Đường dẫn file cần đọc.</param>
     IEnumerable<ContentBlock> Extract(string filePath);
+
+    // [Thay đổi] M6: đọc từ Stream — để quét attachment trong email NGAY TRONG BỘ NHỚ (attachment đã giải mã là dữ liệu nhạy cảm, không được
+    // ghi ra file tạm). Default interface member: extractor chỉ đọc được đường dẫn (VD Tika native) không phải sửa, chỉ cần SupportsStream = false.
+    /// <summary>true nếu đọc được từ Stream (<see cref="Extract(Stream, string)"/>).</summary>
+    bool SupportsStream => false;
+
+    /// <summary>Như <see cref="Extract(string)"/> nhưng đọc từ Stream (seek được, bên gọi tự đóng).</summary>
+    /// <param name="stream">Nội dung file.</param>
+    /// <param name="fileName">Tên file (chỉ để hiển thị/đoán định dạng, không mở từ đĩa).</param>
+    IEnumerable<ContentBlock> Extract(Stream stream, string fileName) => throw new NotSupportedException();
+}
+
+// [Thay đổi] M6: extractor cần tra bộ đọc KHÁC theo đuôi file (EmlExtractor đọc attachment .docx/.pdf/...). FileReaderService gọi SetLookup ngay
+// sau khi nạp mọi extractor bằng reflection (extractor có constructor không tham số nên không nhận phụ thuộc qua constructor được).
+internal interface IUsesExtractorLookup
+{
+    /// <summary>Nhận hàm tra extractor theo đuôi file (VD ".docx"); null nếu không hỗ trợ.</summary>
+    void SetLookup(Func<string, IContentExtractor?> byExtension);
 }

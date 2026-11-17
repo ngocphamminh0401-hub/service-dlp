@@ -1,0 +1,5 @@
+Heading | Header | Subject: Bảng lương tháng 11
+Heading | Header | From: Nguyễn Văn A <a@vd.vn>
+Heading | Header | To: =?bad?X?zz?=
+Paragraph | Body | Than
+Paragraph | Body | 

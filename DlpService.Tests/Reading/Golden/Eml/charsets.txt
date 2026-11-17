@@ -1,0 +1,7 @@
+Heading | Header | Subject: Charsets
+Paragraph | Body | Ti?ng Vi?t windows-1258
+Paragraph | Body | 
+Paragraph | Body | café crème
+Paragraph | Body | 
+Paragraph | Body | Không rõ bảng mã
+Paragraph | Body | 
