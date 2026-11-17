@@ -355,6 +355,10 @@ public class Worker(ILogger<Worker> logger, IConfiguration configuration, IAppLa
             // [Thay đổi] M5: ≤ 0 / thiếu → mặc định 24 giờ (không cho tắt: tắt = bản ghi của thư mục đã mất nằm mãi trong DB)
             RootMissingGrace = configuration.GetValue("Watch:RootMissingGraceHours", 24.0) is > 0 and var h && !double.IsInfinity(h)
                 ? TimeSpan.FromHours(h) : TimeSpan.FromHours(24),
+            // [Thay đổi] M2: trần hàng chờ (≤ 0 / thiếu → 10.000) và giãn nhịp (ngoài 0–10.000 ms → 0 = tắt)
+            MaxPendingFiles = configuration.GetValue("Watch:MaxPendingFiles", 10_000) is > 0 and var cap ? cap : 10_000,
+            MinDelayBetweenFiles = configuration.GetValue("Watch:MinMillisecondsBetweenFiles", 0.0) is > 0 and <= 10_000 and var pause
+                ? TimeSpan.FromMilliseconds(pause) : TimeSpan.Zero,
         };
     }
 }

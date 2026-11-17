@@ -89,6 +89,15 @@ public sealed class InotifyFileChangeSource : IFileChangeSource, IWatchStatistic
     private readonly Dictionary<string, Root> _roots = new(StringComparer.Ordinal);
     private readonly Lock _raiseLock = new(); // báo sự kiện LẦN LƯỢT (xem FileSystemWatcherSource)
     private volatile bool _disposed;
+
+    // [Thay đổi] M2: quét bù thư mục mới — trước đây Task.Run cho MỖI thư mục (mkdir -p / giải nén cây sâu → hàng nghìn task cùng duyệt đĩa song
+    // song, I/O + CPU dồn cục). Giờ: 1 luồng tiêu thụ + hàng đợi CÓ TRẦN. Đầy → báo Failed(root, overflowed: true) để FileWatcherService quét lại
+    // cả thư mục gốc (đường có sẵn) — không mất file. Tối đa 1 lần / 10 s / gốc.
+    internal const int MaxPendingRescans = 1000;
+    private readonly Queue<(string Directory, Root Root)> _rescans = new();
+    private readonly Lock _rescanLock = new();
+    private readonly SemaphoreSlim _rescanSignal = new(0);
+    private readonly Dictionary<Root, DateTime> _rescanOverflowReported = [];
     private int _failedWatches;
     private long _overflows;
     private long _rawEvents;
@@ -104,6 +113,7 @@ public sealed class InotifyFileChangeSource : IFileChangeSource, IWatchStatistic
         }
         WatchLimit = ReadProcInt("/proc/sys/fs/inotify/max_user_watches");
         _reader = new Thread(ReadLoop) { IsBackground = true, Name = "DlpInotifyReader" };
+        _ = Task.Run(RescanLoopAsync); // [Thay đổi] M2: 1 luồng quét bù thư mục mới cho cả nguồn
         _reader.Start();
     }
 
@@ -346,23 +356,75 @@ public sealed class InotifyFileChangeSource : IFileChangeSource, IWatchStatistic
     }
 
     // Quét bù file có sẵn trong thư mục vừa xuất hiện (cp -r, giải nén, mv vào) — chạy nền để không chặn luồng đọc sự kiện
+    // [Thay đổi] M2: xếp vào hàng đợi có trần (1 luồng tiêu thụ — RescanLoopAsync) thay vì Task.Run mỗi thư mục
     private void RescanNewDirectory(string directory, Root root)
     {
-        _ = Task.Run(() =>
+        bool overflow = false;
+        lock (_rescanLock)
         {
-            try
+            // EnumerateFiles duyệt ĐỆ QUY → thư mục con của 1 thư mục đang chờ quét đã nằm trong lượt đó (mkdir -p a/b/c, giải nén cây sâu)
+            foreach (var (pending, pendingRoot) in _rescans)
             {
-                foreach (var file in root.Exclusion.EnumerateFiles(directory))
+                if (ReferenceEquals(pendingRoot, root) && (directory == pending || directory.StartsWith(pending + "/", StringComparison.Ordinal)))
                 {
-                    if (_disposed) return;
-                    if (root.Extensions.Contains(Path.GetExtension(file))) RaiseChanged(file);
+                    return;
                 }
             }
-            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            if (_rescans.Count >= MaxPendingRescans)
             {
-                // Thư mục bị xoá/đổi tên ngay sau khi tạo → bỏ qua
+                var now = DateTime.UtcNow;
+                if (!_rescanOverflowReported.TryGetValue(root, out var last) || now - last >= TimeSpan.FromSeconds(10))
+                {
+                    _rescanOverflowReported[root] = now;
+                    overflow = true;
+                }
             }
-        });
+            else
+            {
+                _rescans.Enqueue((directory, root));
+            }
+        }
+        if (overflow)
+        {
+            // Báo ngoài khoá _rescanLock; FileWatcherService quét lại cả thư mục gốc (bao trùm mọi thư mục không xếp được)
+            lock (_raiseLock)
+            {
+                if (!_disposed) Failed?.Invoke(root.Path, true, new InvalidOperationException($"Quá {MaxPendingRescans} thư mục mới chờ quét bù"));
+            }
+            return;
+        }
+        _rescanSignal.Release();
+    }
+
+    // [Thay đổi] M2: luồng tiêu thụ duy nhất của hàng đợi quét bù thư mục mới — duyệt LẦN LƯỢT từng thư mục (không dồn I/O song song)
+    private async Task RescanLoopAsync()
+    {
+        while (!_disposed)
+        {
+            await _rescanSignal.WaitAsync(TimeSpan.FromSeconds(1));
+            while (!_disposed)
+            {
+                (string Directory, Root Root) item;
+                lock (_rescanLock)
+                {
+                    // Lấy ra TRƯỚC khi duyệt: chỉ thư mục CHƯA BẮT ĐẦU duyệt mới được chặn thư mục con trùng (RescanNewDirectory). Thư mục đang duyệt dở
+                    // thì KHÔNG chặn — EnumerateFiles duyệt lười, có thể đã đi qua danh sách của thư mục cha trước khi thư mục con xuất hiện.
+                    if (!_rescans.TryDequeue(out item)) break;
+                }
+                try
+                {
+                    foreach (var file in item.Root.Exclusion.EnumerateFiles(item.Directory))
+                    {
+                        if (_disposed) return;
+                        if (item.Root.Extensions.Contains(Path.GetExtension(file))) RaiseChanged(file);
+                    }
+                }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+                {
+                    // Thư mục bị xoá/đổi tên ngay sau khi tạo → bỏ qua
+                }
+            }
+        }
     }
 
     private void RaiseChanged(string path)

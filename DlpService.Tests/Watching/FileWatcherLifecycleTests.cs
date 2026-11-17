@@ -159,6 +159,37 @@ public sealed class FileWatcherLifecycleTests : IDisposable
         Assert.True(WaitFor(() => Has(after)), "gốc tạo lại phải được theo dõi lại tự động (R6)");
     }
 
+    // [Thay đổi] M2: quét bù thư mục mới giờ đi qua 1 luồng + hàng đợi có trần (trước: Task.Run mỗi thư mục) — cây sâu tạo dồn dập (giải nén,
+    // mkdir -p rồi ghi file ngay) và cây chuyển vào (mv) vẫn phải được ghi nhận ĐỦ, kể cả file ghi trước khi watch của thư mục con kịp gắn.
+    [Fact]
+    public void Cay_thu_muc_sau_tao_don_dap_va_chuyen_vao_deu_duoc_ghi_nhan_du()
+    {
+        Start();
+        var files = new List<string>();
+        for (int a = 0; a < 5; a++)
+        {
+            string dir = Path.Combine(Root, $"a{a}", "b", "c", "d");
+            Directory.CreateDirectory(dir);
+            for (int i = 0; i < 10; i++)
+            {
+                string f = Path.Combine(dir, $"f{i}.txt");
+                File.WriteAllText(f, "x");
+                files.Add(f);
+            }
+        }
+        string outside = Path.Combine(_work, "ngoai-cay");
+        for (int i = 0; i < 20; i++)
+        {
+            string dir = Path.Combine(outside, $"t{i % 4}");
+            Directory.CreateDirectory(dir);
+            File.WriteAllText(Path.Combine(dir, $"g{i}.txt"), "y");
+        }
+        Directory.Move(outside, Path.Combine(Root, "chuyen-vao"));
+        files.AddRange(Directory.EnumerateFiles(Path.Combine(Root, "chuyen-vao"), "*.txt", SearchOption.AllDirectories));
+
+        Assert.True(WaitFor(() => files.All(Has)), $"còn {files.Count(f => !Has(f))}/{files.Count} file chưa được ghi nhận");
+    }
+
     // [Thay đổi] M5: thư mục gốc mất (chuyển đi / xoá lúc service tắt) → bản ghi bên dưới được xoá SAU ân hạn; có lại trước hạn → không xoá
     private static WatchOptions FastRecovery(TimeSpan grace, TimeSpan? reconcile = null) => new()
     {

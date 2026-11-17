@@ -29,9 +29,21 @@ public class FileWatcherService : IDisposable
     // [Thay đổi] Bước B (checklist "chạy như Windows Service thật"): thay Console.WriteLine bằng ILogger —
     // Console không ai đọc khi chạy dưới Service Control Manager (không có console đính kèm).
     private readonly ILogger _logger;
-    // [Thay đổi] Dictionary -> ConcurrentDictionary: dict này bị luồng watcher (ScheduleProcess) và luồng
-    // ThreadPool (finally của ProcessAfterDebounceAsync) cùng đọc/ghi — Dictionary thường có thể hỏng dữ liệu.
-    private readonly ConcurrentDictionary<string, CancellationTokenSource> _pendingTimers = new(); // dict được tạo ngay khi khai báo
+    // [Thay đổi] M2: hàng chờ CÓ TRẦN + số worker cố định thay cho "_pendingTimers: mỗi path 1 Task + CancellationTokenSource + 1 chỗ chờ trên
+    // _gate" (đo trước M2: 50.000 sự kiện → 50.000 việc chờ, heap +42 MB, tăng tuyến tính). Xem PendingFileQueue.
+    private readonly PendingFileQueue _queue;
+
+    // [Thay đổi] M2: hàng chờ đầy → thư mục gốc của file bị đánh dấu "dirty" → quét bù TỪNG thư mục khi hàng chờ vơi (không mất việc). Không cần lưu DB:
+    // mỗi lần khởi động StartWatching đã quét đối soát TOÀN BỘ mọi thư mục gốc.
+    private readonly ConcurrentDictionary<string, byte> _dirtyRoots = new();
+    private readonly ConcurrentDictionary<string, DateTime> _lastOverflowWarning = new();
+    private long _queueOverflows;
+
+    /// <summary>[Thay đổi] M2: số file đang chờ xử lý (test / metric).</summary>
+    internal int PendingCount => _queue.Count;
+
+    /// <summary>[Thay đổi] M2: số thư mục đang chờ quét bù vì hàng chờ đầy (test / metric).</summary>
+    internal int DirtyRootCount => _dirtyRoots.Count;
 
     // [Thay đổi] Tách lõi bước 3: dict _lastContentHash (chống quét trùng khi nội dung không đổi) đã chuyển sang FileProcessor cùng ProcessFile.
 
@@ -118,6 +130,16 @@ public class FileWatcherService : IDisposable
         _source.FileChanged += OnFileChanged;
         _source.FileDeleted += OnFileDeleted;
         _source.Failed += OnSourceFailed;
+
+        // [Thay đổi] M2: hàng chờ + worker cố định. MaxConcurrency + 1 worker: khi cả MaxConcurrency chỗ ở trạm gác đều bận file nặng, vẫn còn
+        // 1 worker rảnh xử lý file BỊ XOÁ (chỉ là 1 lệnh DB, không xin chỗ ở trạm gác — xem ProcessQueuedAsync).
+        _queue = new PendingFileQueue(_options.MaxPendingFiles, TimeSpan.FromMilliseconds(DebounceMs),
+            _pathPolicy.Comparison == StringComparison.Ordinal ? StringComparer.Ordinal : StringComparer.OrdinalIgnoreCase);
+        for (int i = 0; i < MaxConcurrency + 1; i++)
+        {
+            _ = Task.Run(() => WorkerLoopAsync(_stopping.Token));
+        }
+        _ = Task.Run(() => DirtyRootLoopAsync(_stopping.Token));
     }
 
     // [Thay đổi] Giới hạn số file xử lý cùng lúc (Watch:MaxConcurrency). Trước đây mỗi sự kiện file là 1 task chạy ngay → khi burst
@@ -337,16 +359,19 @@ public class FileWatcherService : IDisposable
     //   - bỏ thư mục loại trừ + không đi theo symlink (WatchExclusion), bỏ thư mục không đọc được thay vì dừng cả lượt quét;
     //   - đối soát (R4): bản ghi trong DB nằm dưới thư mục này mà file không còn trên đĩa → xoá (file bị xoá lúc service tắt / sự kiện bị mất);
     //   - file đọc trúng lúc đang ghi → hẹn xử lý lại qua debounce.
-    private void ScanExistingFiles(string folderPath, string reason)
+    // [Thay đổi] M2: trả true nếu lượt quét THẬT SỰ chạy (false = thư mục không còn / đang có lượt quét khác) — quét bù dirty-root dựa vào đó để
+    // không mất lượt bù. + giãn nhịp (Watch:MinMillisecondsBetweenFiles) cho mọi lượt TRỪ lượt khởi động (để service sẵn sàng nhanh).
+    private bool ScanExistingFiles(string folderPath, string reason)
     {
         if (!Directory.Exists(folderPath) || _disposed)
         {
-            return;
+            return false;
         }
         if (!_scanning.TryAdd(folderPath, 0))
         {
-            return; // đang có 1 lượt quét khác cho thư mục này (VD tràn hàng đợi đúng lúc đối soát)
+            return false; // đang có 1 lượt quét khác cho thư mục này (VD tràn hàng đợi đúng lúc đối soát)
         }
+        var pause = reason == "khởi động" ? TimeSpan.Zero : _options.MinDelayBetweenFiles;
         try
         {
             var clock = Stopwatch.StartNew();
@@ -390,6 +415,10 @@ public class FileWatcherService : IDisposable
                         ScheduleProcess(filePath);
                         break;
                 }
+                if (pause > TimeSpan.Zero)
+                {
+                    Thread.Sleep(pause); // [Thay đổi] M2: giãn nhịp — nghỉ NGOÀI trạm gác (đã Release ở trên), không giữ chỗ xử lý
+                }
             });
 
             // Đối soát: bản ghi của file không còn trên đĩa → xoá
@@ -407,6 +436,7 @@ public class FileWatcherService : IDisposable
 
             _logger.LogInformation("[FileWatcher] Quét ({reason}) {folder}: {total} file — quét {scanned}, bỏ qua {unchanged} không đổi, lỗi đọc {failed}, đang ghi dở {retried}, xoá {removed} bản ghi file không còn ({ms} ms)",
                 reason, folderPath, total, scanned, unchanged, total - scanned - unchanged - retried, retried, removed, clock.ElapsedMilliseconds);
+            return true;
         }
         finally
         {
@@ -594,6 +624,8 @@ public class FileWatcherService : IDisposable
 
     // [Thay đổi] Gộp logic debounce dùng chung cho cả 3 sự kiện (Created/Changed/Renamed) — trước đây chỉ
     // OnFileChanged có, giờ tách ra để OnFileRenamed dùng lại được, không chép lặp code.
+    // [Thay đổi] M2: không tạo Task/CancellationTokenSource cho mỗi path nữa → đưa vào hàng chờ có trần (gộp theo path = debounce). Đầy → đánh dấu
+    // thư mục gốc "dirty" (quét bù sau) — KHÔNG chặn luồng đọc sự kiện, KHÔNG mất việc.
     private void ScheduleProcess(string filePath)
     {
         // [Thay đổi] Mở rộng định dạng: bỏ qua file khoá tạm của Office ("~$baocao.docx") — Filters "*.docx" vẫn
@@ -603,102 +635,142 @@ public class FileWatcherService : IDisposable
             return;
         }
 
-        // [Thay đổi] GĐ3: AddOrUpdate thay cho cặp TryGetValue + gán (2 bước rời: 2 luồng cùng gọi cho 1 file có thể cùng tạo CTS, cái
-        // bị ghi đè không ai huỷ → file bị xử lý 2 lần). AddOrUpdate đổi giá trị nguyên tử; CTS cũ (nếu có) được huỷ ngay sau đó.
-        var newCts = new CancellationTokenSource();
-        CancellationTokenSource? replaced = null;
-        _pendingTimers.AddOrUpdate(filePath, newCts, (_, old) => { replaced = old; return newCts; });
-        if (replaced != null)
+        if (_queue.TryAdd(filePath) == EnqueueResult.Full)
         {
-            try
-            {
-                replaced.Cancel();
-            }
-            catch (ObjectDisposedException)
-            {
-                // lần chạy cũ đã xong
-            }
+            MarkDirty(filePath);
         }
-
-        // [Thay đổi] Truyền cả CTS (thay vì chỉ Token) để finally dùng được TryRemove(KeyValuePair) so sánh đúng CTS
-        // [Thay đổi] GĐ3: + thời điểm nhận sự kiện (đo độ trễ cho metric)
-        _ = ProcessAfterDebounceAsync(filePath, newCts, Stopwatch.GetTimestamp());
     }
 
-    // [Thay đổi] Tham số đổi từ CancellationToken sang CancellationTokenSource (xem finally bên dưới)
-    private async Task ProcessAfterDebounceAsync(string filePath, CancellationTokenSource myCts, long eventTimestamp)
+    // [Thay đổi] M2: hàng chờ đầy → ghi nhận thư mục gốc cần quét bù. Cảnh báo tối đa 1 lần / 10 phút / thư mục (burst lớn tràn hàng nghìn lần).
+    private void MarkDirty(string filePath)
     {
-        try
+        Interlocked.Increment(ref _queueOverflows);
+        string root = FindRoot(filePath) ?? Path.GetDirectoryName(filePath) ?? filePath;
+        _dirtyRoots.TryAdd(root, 0);
+        var now = DateTime.UtcNow;
+        if (!_lastOverflowWarning.TryGetValue(root, out var last) || now - last >= TimeSpan.FromMinutes(10))
         {
-            await Task.Delay(DebounceMs, myCts.Token);
+            _lastOverflowWarning[root] = now;
+            _logger.LogWarning("[FileWatcher] Hàng chờ đầy ({count} file) — {root} được đánh dấu quét bù khi hàng chờ vơi (không bỏ file nào)",
+                _queue.Capacity, root);
+        }
+    }
 
-            // [Thay đổi] GĐ3 (R4): hết debounce mà file không còn (bị xoá / đổi tên đi) → xoá bản ghi NGAY, KHÔNG xếp hàng ở trạm gác:
-            // trạm gác giới hạn số file đang ĐỌC + QUÉT (việc nặng); xoá bản ghi chỉ là 1 lệnh DB. Đo khi viết (xoá 10.000 file, trạm gác 2 chỗ):
-            // xếp hàng chung làm p95 độ trễ của cả lượt lên 2,8 s.
-            if (!File.Exists(filePath))
+    // [Thay đổi] M2: vòng worker (tạo 1 lần, MaxConcurrency + 1 vòng) thay cho ProcessAfterDebounceAsync mỗi path. Lấy file ĐÃ HẾT debounce từ hàng chờ.
+    private async Task WorkerLoopAsync(CancellationToken token)
+    {
+        while (!token.IsCancellationRequested)
+        {
+            string filePath;
+            long firstEvent;
+            try
             {
-                Latency?.Record(Stopwatch.GetElapsedTime(eventTimestamp).TotalMilliseconds - DebounceMs); // [Thay đổi] M3 (âm → 0 trong Record)
-                Interlocked.Increment(ref _processedFromEvents);
-                if (!Directory.Exists(filePath)) RemoveRecords(filePath);
+                (filePath, firstEvent) = await _queue.TakeDueAsync(token);
+            }
+            catch (OperationCanceledException)
+            {
                 return;
             }
 
-            // [Thay đổi] Giới hạn đồng thời: xin chỗ trước khi xử lý. Đang xếp hàng mà có sự kiện mới hơn cho cùng file (hoặc service
-            // dừng) thì huỷ được ngay — không giữ chỗ cho 1 nội dung đã cũ.
-            await _gate.WaitAsync(myCts.Token);
             try
             {
-                // [Thay đổi] GĐ3 (3.6): độ trễ từ lúc nhận sự kiện tới lúc bắt đầu xử lý, đã trừ debounce
-                Latency?.Record(Stopwatch.GetElapsedTime(eventTimestamp).TotalMilliseconds - DebounceMs); // [Thay đổi] M3 (âm → 0 trong Record)
-                Interlocked.Increment(ref _processedFromEvents);
+                await ProcessQueuedAsync(filePath, firstEvent, token);
+            }
+            catch (OperationCanceledException)
+            {
+                return; // service đang dừng
+            }
+            catch (Exception ex)
+            {
+                // [Thay đổi] Nhóm D - bọc try/catch rộng: 1 lỗi bất ngờ khi đọc/quét file (file bị khoá, encoding lạ, hết dung lượng đĩa...)
+                // không được làm chết vòng worker — ghi rõ vào log rồi lấy việc tiếp.
+                _logger.LogError(ex, "[FileWatcher] Lỗi xử lý file {filePath}", filePath);
+            }
 
-                // [Thay đổi] H2: đến từ sự kiện ghi → bỏ cache tầng 1 (size/mtime trùng không chứng minh "không đổi"), luôn đọc + băm
-                var outcome = _processor.ProcessFile(filePath, fromChangeEvent: true);
-                if (outcome == ProcessOutcome.ChangedDuringRead)
+            if (_options.MinDelayBetweenFiles > TimeSpan.Zero)
+            {
+                try
                 {
-                    // [Thay đổi] GĐ3 (3.4): đọc trúng lúc đang ghi → hẹn lại sau debounce (ghi xong thường có thêm sự kiện; hẹn lại để chắc)
-                    Interlocked.Increment(ref _changedDuringRead);
-                    _ = Task.Run(async () =>
-                    {
-                        await Task.Delay(DebounceMs);
-                        ScheduleProcess(filePath);
-                    });
+                    await Task.Delay(_options.MinDelayBetweenFiles, token); // [Thay đổi] M2: giãn nhịp — nghỉ ngoài trạm gác
+                }
+                catch (OperationCanceledException)
+                {
+                    return;
                 }
             }
-            finally
+        }
+    }
+
+    // [Thay đổi] M2: thân của ProcessAfterDebounceAsync cũ, bỏ phần debounce (hàng chờ đã lo) — hành vi xử lý giữ nguyên
+    private async Task ProcessQueuedAsync(string filePath, long eventTimestamp, CancellationToken token)
+    {
+        // [Thay đổi] GĐ3 (R4): hết debounce mà file không còn (bị xoá / đổi tên đi) → xoá bản ghi NGAY, KHÔNG xếp hàng ở trạm gác:
+        // trạm gác giới hạn số file đang ĐỌC + QUÉT (việc nặng); xoá bản ghi chỉ là 1 lệnh DB. Đo khi viết (xoá 10.000 file, trạm gác 2 chỗ):
+        // xếp hàng chung làm p95 độ trễ của cả lượt lên 2,8 s.
+        if (!File.Exists(filePath))
+        {
+            Latency?.Record(Stopwatch.GetElapsedTime(eventTimestamp).TotalMilliseconds - DebounceMs); // [Thay đổi] M3 (âm → 0 trong Record)
+            Interlocked.Increment(ref _processedFromEvents);
+            if (!Directory.Exists(filePath)) RemoveRecords(filePath);
+            return;
+        }
+
+        // [Thay đổi] Giới hạn đồng thời: xin chỗ trước khi xử lý (dùng chung với ScanExistingFiles → tổng không vượt MaxConcurrency)
+        await _gate.WaitAsync(token);
+        try
+        {
+            // [Thay đổi] GĐ3 (3.6): độ trễ từ lúc nhận sự kiện (ĐẦU TIÊN của path) tới lúc bắt đầu xử lý, đã trừ debounce
+            Latency?.Record(Stopwatch.GetElapsedTime(eventTimestamp).TotalMilliseconds - DebounceMs); // [Thay đổi] M3 (âm → 0 trong Record)
+            Interlocked.Increment(ref _processedFromEvents);
+
+            // [Thay đổi] H2: đến từ sự kiện ghi → bỏ cache tầng 1 (size/mtime trùng không chứng minh "không đổi"), luôn đọc + băm
+            var outcome = _processor.ProcessFile(filePath, fromChangeEvent: true);
+            if (outcome == ProcessOutcome.ChangedDuringRead)
             {
-                _gate.Release();
+                // [Thay đổi] GĐ3 (3.4): đọc trúng lúc đang ghi → xử lý lại sau debounce. [Thay đổi] M2: đưa lại vào hàng chờ (trước: Task.Run riêng)
+                Interlocked.Increment(ref _changedDuringRead);
+                ScheduleProcess(filePath);
             }
-        }
-        // [Thay đổi] TaskCanceledException → OperationCanceledException (lớp cha): huỷ khi đang chờ ở trạm gác cũng thuộc loại này
-        catch (OperationCanceledException)
-        {
-            // Sự kiện mới hơn đã đến, bỏ qua lần xử lý này
-        }
-        catch (Exception ex)
-        {
-            // [Thay đổi] Nhóm D - bọc try/catch rộng: trước đây chỉ bắt TaskCanceledException, 1 lỗi bất ngờ
-            // khi đọc/quét file (file bị khoá, encoding lạ, hết dung lượng đĩa...) sẽ trở thành exception
-            // "unobserved" trong Task chạy rời (_ = ProcessAfterDebounceAsync(...)) — không crash service
-            // nhưng cũng không ai biết đã xảy ra. Bắt lại và ghi rõ vào log thay vì để trôi đi âm thầm.
-            _logger.LogError(ex, "[FileWatcher] Lỗi xử lý file {filePath}", filePath);
         }
         finally
         {
-            // [Thay đổi] Chuyển từ cuối khối try sang finally: đảm bảo LUÔN dọn _pendingTimers dù xử lý
-            // thành công, bị huỷ (TaskCanceledException), hay gặp lỗi bất ngờ (catch Exception ở trên) —
-            // trước đây nếu có lỗi bất ngờ, dòng dọn dẹp này sẽ KHÔNG chạy, khiến filePath bị kẹt trong dict.
-            //
-            // [Thay đổi] Race condition: chỉ xoá entry nếu nó vẫn đúng là CTS của CHÍNH lần chạy này — nếu 1
-            // sự kiện MỚI HƠN đã đến trong lúc lần chạy này đang xử lý (quá điểm Task.Delay có thể huỷ được),
-            // _pendingTimers[filePath] lúc này đã bị ghi đè bằng CTS của lần chạy mới. Xoá vô điều kiện sẽ xoá
-            // NHẦM CTS của lần chạy mới đó, khiến 1 sự kiện thứ 3 đến sau không còn huỷ được nó — phá vỡ đúng
-            // cơ chế debounce.
-            //
-            // [Thay đổi] Thay cặp "TryGetValue rồi Remove" (2 bước rời, luồng khác có thể chen vào giữa) bằng
-            // TryRemove(KeyValuePair): ConcurrentDictionary chỉ xoá khi value hiện tại ĐÚNG là myCts, và làm
-            // việc so sánh + xoá liền 1 bước (atomic) — không luồng nào chen vào giữa được.
-            _pendingTimers.TryRemove(new KeyValuePair<string, CancellationTokenSource>(filePath, myCts));
+            _gate.Release();
+        }
+    }
+
+    // [Thay đổi] M2: quét bù thư mục "dirty" ở TỐC ĐỘ THẤP — thức mỗi 1 s, chỉ chạy khi hàng chờ còn dưới 50 % trần, mỗi lần 1 thư mục. Chạy cả khi
+    // không bật chu kỳ nền nào (bản Windows mặc định). File không đổi dừng ở cache H1/H2 nên lượt bù rẻ. Bị bỏ qua (đang có lượt quét khác) → giữ dirty.
+    private async Task DirtyRootLoopAsync(CancellationToken token)
+    {
+        while (!token.IsCancellationRequested)
+        {
+            try
+            {
+                await Task.Delay(1000, token);
+            }
+            catch (OperationCanceledException)
+            {
+                return;
+            }
+            if (_dirtyRoots.IsEmpty || _queue.Count >= _queue.Capacity / 2)
+            {
+                continue;
+            }
+            string root = _dirtyRoots.Keys.First();
+            _dirtyRoots.TryRemove(root, out _);
+            try
+            {
+                bool ran = ScanExistingFiles(root, "bù sau quá tải hàng chờ");
+                if (!ran && Directory.Exists(root))
+                {
+                    _dirtyRoots.TryAdd(root, 0); // đang có lượt quét khác → thử lại vòng sau
+                }
+            }
+            catch (Exception ex)
+            {
+                _dirtyRoots.TryAdd(root, 0);
+                _logger.LogError(ex, "[FileWatcher] Quét bù sau quá tải hàng chờ thất bại {root} — thử lại sau", root);
+            }
         }
     }
 
@@ -762,8 +834,9 @@ public class FileWatcherService : IDisposable
         {
             watch = $"{s.WatchCount}/{(s.WatchLimit < 0 ? "?" : s.WatchLimit.ToString(System.Globalization.CultureInfo.InvariantCulture))} (lỗi {s.FailedWatchCount}), tràn tổng {s.OverflowCount}, sự kiện thô tổng {s.RawEventCount}";
         }
-        _logger.LogInformation("[Metric] {sec:0}s: watch {watch} | sự kiện đổi {changed}, xoá {deleted} → xử lý {processed} | trễ p50 {p50:0} ms, p95 {p95:0} ms, max {max:0} ms | đang chờ {pending}, ghi dở {retried}, xoá bản ghi {removed}",
-            span.TotalSeconds, watch, changed, deleted, processed, lat.P50, lat.P95, lat.Max, _pendingTimers.Count, retried, removed);
+        _logger.LogInformation("[Metric] {sec:0}s: watch {watch} | sự kiện đổi {changed}, xoá {deleted} → xử lý {processed} | trễ p50 {p50:0} ms, p95 {p95:0} ms, max {max:0} ms | đang chờ {pending}/{capacity} (lâu nhất {oldest:0} ms), tràn {overflow}, thư mục chờ quét bù {dirty} | ghi dở {retried}, xoá bản ghi {removed}",
+            span.TotalSeconds, watch, changed, deleted, processed, lat.P50, lat.P95, lat.Max, _queue.Count, _queue.Capacity, _queue.OldestAgeMs,
+            Interlocked.Exchange(ref _queueOverflows, 0), _dirtyRoots.Count, retried, removed); // [Thay đổi] M2: + trần, tuổi việc chờ, số lần tràn, dirty
     }
 
     // [Sửa lỗi] Watcher bị GC thu hồi: dừng theo dõi CHỦ ĐỘNG khi service dừng (thay vì chờ GC), huỷ các file đang chờ debounce
@@ -780,17 +853,8 @@ public class FileWatcherService : IDisposable
         _source.Failed -= OnSourceFailed;
         _source.Dispose();
 
-        foreach (var cts in _pendingTimers.Values)
-        {
-            try
-            {
-                cts.Cancel();
-            }
-            catch (ObjectDisposedException)
-            {
-                // Lần xử lý đó vừa xong và tự dọn — bỏ qua
-            }
-        }
+        // [Thay đổi] M2: _stopping.Cancel() ở trên đã dừng mọi vòng worker + vòng quét bù; file còn trong hàng chờ không xử lý nữa (lần khởi động sau
+        // quét đối soát toàn bộ). File ĐANG xử lý dở thì để chạy nốt — ResultStore tự bỏ qua khi đã đóng.
         GC.SuppressFinalize(this);
     }
 

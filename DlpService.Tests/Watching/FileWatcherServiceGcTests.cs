@@ -75,14 +75,18 @@ public sealed class FileWatcherServiceGcTests : IDisposable
     [MethodImpl(MethodImplOptions.NoInlining)]
     private static void StartWithoutKeepingReference(string folder, ILogger logger) => NewService(logger).StartWatching(folder);
 
+    // [Thay đổi] M2: trước M2 test này ghi lại CƠ CHẾ GÂY LỖI CŨ (không giữ tham chiếu → GC thu hồi → file KHÔNG được xử lý, Assert.False). Từ M2,
+    // FileWatcherService có các vòng worker cố định (Task.Run giữ `this`, đang chờ việc thì được bộ hẹn giờ của runtime giữ sống) → service KHÔNG thể
+    // bị GC thu hồi khi còn chạy, kể cả khi nơi tạo quên giữ tham chiếu → lỗi 22/10 không thể tái diễn. Đổi lại: service CHỈ dừng khi Dispose()
+    // (Worker gọi khi dừng; test dùng `using`). Test giờ khoá hành vi mới.
     [Fact]
-    public void KhongGiuThamChieu_SauGc_KhongConXuLyFile_CoCheGayLoiCu()
+    public void KhongGiuThamChieu_VongWorkerGiuServiceSong_VanXuLyFile()
     {
         var logger = new CaptureLogger();
-        StartWithoutKeepingReference(_folder, logger); // cách Worker làm TRƯỚC khi sửa (biến cục bộ không dùng sau await)
+        StartWithoutKeepingReference(_folder, logger); // cách Worker làm TRƯỚC bản sửa 22/10 (biến cục bộ không dùng sau await)
         ForceFullGc();
-        Assert.False(DropAndWaitProcessed(logger, "mat-watcher.txt"),
-            "nếu test này FAIL nghĩa là .NET đã đổi cách giữ FileSystemWatcher — cơ chế lỗi cũ không còn, có thể xoá test");
+        Assert.True(DropAndWaitProcessed(logger, "van-chay.txt"),
+            "vòng worker (M2) phải giữ service sống sau GC — nếu FAIL: cơ chế lỗi 22/10 (watcher bị GC thu hồi khi rảnh) đã quay lại");
     }
 
     [Fact]

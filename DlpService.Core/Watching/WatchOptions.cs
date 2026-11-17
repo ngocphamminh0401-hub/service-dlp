@@ -30,4 +30,12 @@ public sealed record WatchOptions
     // lâu → xoá. Đủ dài để rút ổ mạng/USB qua đêm, đổi tên tạm không bị xoá nhầm (xoá rồi phải quét lại toàn bộ khi có lại).
     /// <summary>Ân hạn trước khi xoá bản ghi của thư mục gốc đã mất / bản ghi ngoài mọi thư mục theo dõi ("Watch:RootMissingGraceHours").</summary>
     public TimeSpan RootMissingGrace { get; init; } = TimeSpan.FromHours(24);
+
+    // [Thay đổi] M2: trần hàng chờ — số file KHÁC NHAU đang chờ xử lý (mỗi mục ~300 byte). Đầy → thư mục bị đánh dấu "dirty" để quét bù sau, KHÔNG mất việc.
+    /// <summary>Số file khác nhau tối đa đang chờ xử lý ("Watch:MaxPendingFiles").</summary>
+    public int MaxPendingFiles { get; init; } = 10_000;
+
+    // [Thay đổi] M2: giãn nhịp — mỗi worker nghỉ khoảng này SAU mỗi file (không giữ chỗ xử lý khi nghỉ) để hạ CPU lúc burst. 0 = tắt (mặc định).
+    /// <summary>Thời gian nghỉ giữa 2 file của mỗi worker ("Watch:MinMillisecondsBetweenFiles"); Zero = không nghỉ.</summary>
+    public TimeSpan MinDelayBetweenFiles { get; init; } = TimeSpan.Zero;
 }
