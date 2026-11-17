@@ -25,4 +25,9 @@ public sealed record WatchOptions
 
     /// <summary>R6: thời gian chờ tối đa giữa 2 lần thử theo dõi lại.</summary>
     public TimeSpan RecoveryMaxDelay { get; init; } = TimeSpan.FromSeconds(60);
+
+    // [Thay đổi] M5: thư mục gốc biến mất LIÊN TỤC quá lâu (bị xoá / chuyển đi) → xoá bản ghi bên dưới; bản ghi nằm ngoài mọi thư mục theo dõi quá
+    // lâu → xoá. Đủ dài để rút ổ mạng/USB qua đêm, đổi tên tạm không bị xoá nhầm (xoá rồi phải quét lại toàn bộ khi có lại).
+    /// <summary>Ân hạn trước khi xoá bản ghi của thư mục gốc đã mất / bản ghi ngoài mọi thư mục theo dõi ("Watch:RootMissingGraceHours").</summary>
+    public TimeSpan RootMissingGrace { get; init; } = TimeSpan.FromHours(24);
 }

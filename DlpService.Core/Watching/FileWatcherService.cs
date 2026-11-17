@@ -63,6 +63,11 @@ public class FileWatcherService : IDisposable
     private readonly ConcurrentDictionary<string, byte> _scanning = new();
     private readonly ConcurrentDictionary<string, byte> _recovering = new();
 
+    // [Thay đổi] M5: thư mục gốc bắt đầu biến mất từ lúc nào (UTC) + đã xoá bản ghi của nó chưa. Chỉ trong RAM: restart → đếm lại → chỉ có thể xoá
+    // MUỘN hơn ân hạn, không bao giờ sớm hơn.
+    private readonly ConcurrentDictionary<string, DateTime> _rootMissingSince = new();
+    private readonly ConcurrentDictionary<string, byte> _rootPurged = new();
+
     // [Thay đổi] GĐ3: vòng nền (đối soát, làm mới mẫu, metric) + cờ dừng
     private readonly CancellationTokenSource _stopping = new();
     private Task? _background;
@@ -171,7 +176,15 @@ public class FileWatcherService : IDisposable
         // không chặn các thư mục còn lại. (Trước đây ScanExistingFiles im lặng thoát nên service "chạy mà không quét gì".)
         if (!Directory.Exists(folderPath))
         {
-            _logger.LogWarning("[FileWatcher] Thư mục theo dõi không tồn tại, bỏ qua: {folder}", folderPath);
+            // [Thay đổi] M5 (đường #2): trước đây chỉ cảnh báo rồi bỏ → root bị xoá LÚC SERVICE TẮT thì bản ghi bên dưới nằm mãi trong DB, và root được
+            // tạo lại sau đó cũng không bao giờ được theo dõi. Giờ vẫn ghi nhận root + vòng chờ: có lại → theo dõi + quét; mất quá ân hạn → xoá bản ghi.
+            _logger.LogWarning("[FileWatcher] Thư mục theo dõi không tồn tại: {folder} — chờ thư mục xuất hiện (mất quá {hours:0.#} giờ sẽ xoá bản ghi cũ bên dưới)",
+                folderPath, _options.RootMissingGrace.TotalHours);
+            lock (_watchersLock)
+            {
+                if (!_watchFolders.Any(f => string.Equals(f, folderPath, _pathPolicy.Comparison))) _watchFolders.Add(folderPath);
+            }
+            StartRecovery(folderPath);
             return;
         }
 
@@ -225,6 +238,9 @@ public class FileWatcherService : IDisposable
     public void StartBackgroundTasks()
     {
         if (_background != null || _disposed) return;
+        // [Thay đổi] M5 (đường #4): quét bản ghi mồ côi 1 lần lúc khởi động — kể cả khi không bật chu kỳ nào (bản Windows mặc định không đối soát).
+        // Chạy nền để không làm chậm lúc khởi động.
+        _ = Task.Run(SweepOrphans);
         if (_options.ReconcileInterval <= TimeSpan.Zero && _options.PatternRefreshInterval <= TimeSpan.Zero && _options.MetricsInterval <= TimeSpan.Zero)
         {
             return;
@@ -261,8 +277,15 @@ public class FileWatcherService : IDisposable
                 foreach (var folder in WatchedFolders)
                 {
                     if (token.IsCancellationRequested) return;
+                    // [Thay đổi] M5 (đường #3): đối soát thoát ngay khi root không tồn tại → bảo đảm có vòng chờ (đếm ân hạn, theo dõi lại khi có lại)
+                    if (!Directory.Exists(folder))
+                    {
+                        StartRecovery(folder);
+                        continue;
+                    }
                     Guard("quét đối soát", () => ScanExistingFiles(folder, "đối soát"));
                 }
+                SweepOrphans(); // [Thay đổi] M5 (đường #4)
             }
             if (_options.MetricsInterval > TimeSpan.Zero && now >= nextMetrics)
             {
@@ -482,6 +505,26 @@ public class FileWatcherService : IDisposable
         }
     }
 
+    // [Thay đổi] M5 (đường #4): bản ghi nằm ngoài mọi thư mục đang theo dõi (kể cả thư mục đang mất — bản ghi của chúng do vòng chờ ở trên xử lý)
+    // quá ân hạn → xoá. Danh sách rỗng → ResultStore không làm gì (chốt an toàn: cấu hình rỗng không được xoá cả DB). Chỉ log SỐ LƯỢNG.
+    private void SweepOrphans()
+    {
+        if (_store == null || _disposed) return;
+        try
+        {
+            int removed = _store.SweepOrphans(WatchedFolders, _options.RootMissingGrace);
+            if (removed > 0)
+            {
+                Interlocked.Add(ref _removedRecords, removed);
+                _logger.LogWarning("[FileWatcher] {count} bản ghi nằm ngoài mọi thư mục theo dõi quá {hours:0.#} giờ — đã xoá", removed, _options.RootMissingGrace.TotalHours);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "[FileWatcher] Không quét được bản ghi ngoài thư mục theo dõi — thử lại ở lượt đối soát sau");
+        }
+    }
+
     // [Thay đổi] GĐ3 (R6): chờ thư mục gốc dùng được lại (VD Documents bị xoá rồi tạo lại, ổ mạng mất rồi có lại) → gỡ theo dõi cũ, theo dõi
     // lại, quét đối soát. Chờ tăng dần 5 s → 10 s → … → tối đa 60 s. Mỗi thư mục chỉ 1 vòng chờ cùng lúc.
     private void StartRecovery(string folder)
@@ -502,6 +545,23 @@ public class FileWatcherService : IDisposable
                     catch (OperationCanceledException)
                     {
                         return;
+                    }
+                    // [Thay đổi] M5 (đường #1): root vẫn mất → đếm ân hạn; quá hạn → xoá bản ghi bên dưới 1 lần, vẫn chờ tiếp (có lại → theo dõi + quét lại,
+                    // bản ghi được tạo mới đúng hiện trạng). Có lại TRƯỚC hạn → bỏ đếm, không xoá gì.
+                    if (!Directory.Exists(folder))
+                    {
+                        var since = _rootMissingSince.GetOrAdd(folder, DateTime.UtcNow);
+                        if (DateTime.UtcNow - since >= _options.RootMissingGrace && _rootPurged.TryAdd(folder, 0))
+                        {
+                            int removed = RemoveRecords(folder);
+                            _logger.LogWarning("[FileWatcher] Thư mục gốc {folder} đã mất {hours:0.#} giờ — xoá {count} bản ghi bên dưới (vẫn chờ thư mục xuất hiện lại)",
+                                folder, (DateTime.UtcNow - since).TotalHours, removed);
+                        }
+                    }
+                    else
+                    {
+                        _rootMissingSince.TryRemove(folder, out _);
+                        _rootPurged.TryRemove(folder, out _);
                     }
                     if (Directory.Exists(folder))
                     {

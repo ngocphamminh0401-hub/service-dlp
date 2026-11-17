@@ -151,7 +151,8 @@ public sealed partial class ResultStore : IDisposable
               mtime_utc     INTEGER NOT NULL,
               file_hash     TEXT,
               last_scan_utc INTEGER,
-              change_token  TEXT
+              change_token  TEXT,
+              orphan_since_utc INTEGER
             );
             CREATE TABLE IF NOT EXISTS scan_result (
               file_id      INTEGER PRIMARY KEY REFERENCES file_state(file_id),
@@ -287,6 +288,16 @@ public sealed partial class ResultStore : IDisposable
         try
         {
             Execute("ALTER TABLE scan_result ADD COLUMN incomplete_reason TEXT;");
+        }
+        catch (SqliteException ex) when (ex.Message.Contains("duplicate column", StringComparison.OrdinalIgnoreCase))
+        {
+            // Cột đã có sẵn — không phải lỗi
+        }
+
+        // [Thay đổi] M5: thời điểm bản ghi bắt đầu nằm ngoài mọi thư mục theo dõi (SweepOrphans). NULL = không mồ côi.
+        try
+        {
+            Execute("ALTER TABLE file_state ADD COLUMN orphan_since_utc INTEGER;");
         }
         catch (SqliteException ex) when (ex.Message.Contains("duplicate column", StringComparison.OrdinalIgnoreCase))
         {

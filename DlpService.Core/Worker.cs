@@ -352,6 +352,9 @@ public class Worker(ILogger<Worker> logger, IConfiguration configuration, IAppLa
             ReconcileInterval = Positive(TimeSpan.FromMinutes(configuration.GetValue("Watch:ReconcileIntervalMinutes", 0.0))),
             PatternRefreshInterval = Positive(TimeSpan.FromSeconds(configuration.GetValue("Watch:PatternRefreshSeconds", 0.0))),
             MetricsInterval = Positive(TimeSpan.FromSeconds(configuration.GetValue("Watch:MetricsIntervalSeconds", 0.0))),
+            // [Thay đổi] M5: ≤ 0 / thiếu → mặc định 24 giờ (không cho tắt: tắt = bản ghi của thư mục đã mất nằm mãi trong DB)
+            RootMissingGrace = configuration.GetValue("Watch:RootMissingGraceHours", 24.0) is > 0 and var h && !double.IsInfinity(h)
+                ? TimeSpan.FromHours(h) : TimeSpan.FromHours(24),
         };
     }
 }

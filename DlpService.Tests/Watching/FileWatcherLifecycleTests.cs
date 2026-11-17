@@ -159,6 +159,85 @@ public sealed class FileWatcherLifecycleTests : IDisposable
         Assert.True(WaitFor(() => Has(after)), "gốc tạo lại phải được theo dõi lại tự động (R6)");
     }
 
+    // [Thay đổi] M5: thư mục gốc mất (chuyển đi / xoá lúc service tắt) → bản ghi bên dưới được xoá SAU ân hạn; có lại trước hạn → không xoá
+    private static WatchOptions FastRecovery(TimeSpan grace, TimeSpan? reconcile = null) => new()
+    {
+        RecoveryInitialDelay = TimeSpan.FromMilliseconds(50),
+        RecoveryMaxDelay = TimeSpan.FromMilliseconds(100),
+        RootMissingGrace = grace,
+        ReconcileInterval = reconcile ?? TimeSpan.Zero
+    };
+
+    [Fact]
+    public void Chuyen_goc_di_noi_khac_thi_sau_an_han_xoa_ban_ghi_ben_duoi()
+    {
+        string sibling = Path.Combine(_work, "watch-khac", "x.txt"); // tiền tố giống "watch" — không được đụng
+        _store.SaveScan(new ScanRecord(sibling, 1, DateTime.UtcNow, "h", 0, ResultStore.StatusFinal, false, "{}", []));
+        Start(FastRecovery(TimeSpan.FromSeconds(2)));
+        string f1 = Path.Combine(Root, "a.txt"), f2 = Path.Combine(Root, "con", "b.txt");
+        Directory.CreateDirectory(Path.GetDirectoryName(f2)!);
+        File.WriteAllText(f1, "x");
+        File.WriteAllText(f2, "y");
+        Assert.True(WaitFor(() => Has(f1) && Has(f2)));
+
+        Directory.Move(Root, Path.Combine(_work, "da-chuyen")); // chỉ có IN_MOVE_SELF ở gốc — không có sự kiện xoá từng file
+        Thread.Sleep(500);
+        Assert.True(Has(f1) && Has(f2), "trước ân hạn: chưa được xoá (có thể chỉ là rút ổ / đổi tên tạm)");
+
+        Assert.True(WaitFor(() => !Has(f1) && !Has(f2)), "quá ân hạn: bản ghi dưới gốc đã mất phải bị xoá");
+        Assert.True(Has(sibling), "thư mục có tiền tố giống không được đụng");
+    }
+
+    [Fact]
+    public void Goc_mat_tam_roi_co_lai_truoc_han_thi_khong_xoa_va_theo_doi_lai()
+    {
+        Start(FastRecovery(TimeSpan.FromSeconds(5)));
+        string f1 = Path.Combine(Root, "a.txt");
+        File.WriteAllText(f1, "x");
+        Assert.True(WaitFor(() => Has(f1)));
+
+        string away = Path.Combine(_work, "tam");
+        Directory.Move(Root, away);
+        Thread.Sleep(500);
+        Directory.Move(away, Root);
+        Thread.Sleep(1500); // chờ vòng theo dõi lại gắn xong
+        string f2 = Path.Combine(Root, "moi.txt");
+        File.WriteAllText(f2, "y");
+
+        Assert.True(WaitFor(() => Has(f2)), "gốc có lại phải được theo dõi lại");
+        Thread.Sleep(5500); // qua cả mốc ân hạn tính từ lúc mất
+        Assert.True(Has(f1), "gốc có lại TRƯỚC hạn: bản ghi cũ không được xoá");
+    }
+
+    [Fact]
+    public void Goc_bi_xoa_luc_service_tat_thi_sau_an_han_xoa_va_tao_lai_thi_theo_doi()
+    {
+        string old = Path.Combine(Root, "cu.txt");
+        _store.SaveScan(new ScanRecord(old, 1, DateTime.UtcNow, "h", 0, ResultStore.StatusFinal, false, "{}", []));
+        Directory.Delete(Root, recursive: true);
+
+        Start(FastRecovery(TimeSpan.FromMilliseconds(300))); // trước M5: chỉ cảnh báo "bỏ qua", không bao giờ xoá / theo dõi lại
+
+        Assert.True(WaitFor(() => !Has(old)), "gốc mất lúc service tắt: quá ân hạn phải xoá bản ghi");
+        Directory.CreateDirectory(Root);
+        Thread.Sleep(1000);
+        string fresh = Path.Combine(Root, "moi.txt");
+        File.WriteAllText(fresh, "z");
+        Assert.True(WaitFor(() => Has(fresh)), "gốc được tạo lại sau đó phải được theo dõi");
+    }
+
+    [Fact]
+    public void Ban_ghi_ngoai_moi_thu_muc_theo_doi_bi_xoa_sau_an_han()
+    {
+        string orphan = Path.Combine(_work, "goc-cu-da-bo-khoi-cau-hinh", "x.txt");
+        _store.SaveScan(new ScanRecord(orphan, 1, DateTime.UtcNow, "h", 0, ResultStore.StatusFinal, false, "{}", []));
+
+        var service = Start(FastRecovery(TimeSpan.FromSeconds(1), reconcile: TimeSpan.FromSeconds(1)));
+        service.StartBackgroundTasks(); // quét mồ côi lúc khởi động (đánh dấu) + mỗi lượt đối soát
+
+        Assert.True(WaitFor(() => !Has(orphan)), "bản ghi ngoài mọi thư mục theo dõi phải bị xoá sau ân hạn");
+    }
+
     // Nguồn sự kiện "câm" — mô phỏng sự kiện bị mất hoàn toàn (hết watch, tràn không báo...). Chỉ quét đối soát còn bắt được thay đổi.
     private sealed class SilentSource : IFileChangeSource
     {
