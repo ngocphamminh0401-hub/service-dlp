@@ -202,28 +202,15 @@ public sealed class FileProcessor
                     filePath, cacheMs, readMs, hashMs, scanMs, classifyMs, saveMs, perf.Elapsed.TotalMilliseconds);
             }
 
-            // [Thay đổi] Log timeout: có rule quá thời gian → quét CHƯA TRỌN, không đủ căn cứ kết luận. Cảnh báo (tên rule
-            // + đường dẫn file), KHÔNG gắn mức, KHÔNG log "sạch" (trước đây timeout bị nuốt im lặng → file có thể bị log
-            // "sạch" dù chưa quét hết — lỗ để né phát hiện). Chỉ log tên rule, không log giá trị trong file.
+            // [Thay đổi] Log timeout: có rule quá thời gian → quét CHƯA TRỌN, không đủ căn cứ kết luận. Chỉ log tên rule, không log giá trị.
+            // [Thay đổi] M4: + hết ngân sách thời gian của cả file. Trước đây nhánh riêng ghi provisional + labels NULL → HasConclusion = false → file
+            // bị quét lại ở MỌI lượt đối soát, mỗi lần tốn nguyên thời gian timeout. Giờ gộp vào cơ chế H3: incomplete (scan_budget / regex_timeout),
+            // labels khác NULL (Unknown hoặc mức tối thiểu) → có cache; nội dung đổi (H2) hoặc rule đổi (H1) thì quét lại.
             if (!scan.IsComplete)
             {
-                _logger.LogWarning("[DLP] {filePath}: quét CHƯA TRỌN — {count} rule quá thời gian: {rules}",
-                    filePath, scan.TimedOutPatterns.Count, string.Join(", ", scan.TimedOutPatterns));
-                _logger.LogWarning("[DLP] {filePath}: CHƯA KẾT LUẬN ĐƯỢC — không gắn mức, cần xem lại ({count} chỗ khớp tìm được trước khi dừng)",
-                    filePath, matches.Count);
-
-                // Xoá hash đã lưu ở trên để lần quét sau (file đổi, quét bù khi buffer tràn) được thử lại thay vì bị bỏ qua
-                // vì "nội dung không đổi". Chỉ xoá nếu hash vẫn là của lần này (luồng khác có thể vừa ghi hash mới hơn).
-                _lastContentHash.TryRemove(new KeyValuePair<string, string>(filePath, hash));
-
-                // [Thay đổi] Ghi DB: chưa kết luận → provisional, needs_review, s1 = 0, không có nhãn. Vẫn lưu finding của
-                // các chỗ khớp tìm được trước khi dừng (chỉ mã rule + vị trí).
-                classifyMs = Lap(ref lastMark); // [Thay đổi] Đo hiệu năng
-                TrySave(filePath, size, mtimeUtc, hash, 0, ResultStore.StatusProvisional, needsReview: true, labelsJson: null, BuildFindings(matches, null),
-                    changeToken: token); // [Thay đổi] H2
-                saveMs = Lap(ref lastMark); // [Thay đổi] Đo hiệu năng
-                LogPerf();
-                return ProcessOutcome.Scanned;
+                _logger.LogWarning("[DLP] {filePath}: quét regex CHƯA TRỌN ({reason}) — {count} rule quá thời gian: {rules}; {found} chỗ khớp tìm được trước khi dừng",
+                    filePath, scan.IncompleteReason, scan.TimedOutPatterns.Count, string.Join(", ", scan.TimedOutPatterns), matches.Count);
+                incomplete ??= scan.IncompleteReason; // lý do ở tầng đọc (VD bị cắt) có trước thì giữ lý do đó
             }
 
             if (matches.Count == 0)

@@ -60,7 +60,15 @@ public class Worker(ILogger<Worker> logger, IConfiguration configuration, IAppLa
             minConfidence = CandidateScorer.DefaultMinConfidence;
         }
         logger.LogInformation("Ngưỡng điểm chỗ khớp: MinConfidence={min:0.00}", minConfidence);
-        var scanner = new RegexScanner(patterns, rulesVer, minConfidence);
+        // [Thay đổi] M4: ngân sách thời gian quét regex cho CẢ 1 file ("Scan:MaxSecondsPerFile", mặc định 10 s). Sai (≤ 0, NaN) → mặc định + cảnh báo.
+        double maxScanSeconds = configuration.GetValue("Scan:MaxSecondsPerFile", RegexScanner.DefaultMaxScanTime.TotalSeconds);
+        if (!(maxScanSeconds > 0) || double.IsInfinity(maxScanSeconds))
+        {
+            logger.LogWarning("Scan:MaxSecondsPerFile không hợp lệ ({value}), dùng mặc định {default:0} s", maxScanSeconds, RegexScanner.DefaultMaxScanTime.TotalSeconds);
+            maxScanSeconds = RegexScanner.DefaultMaxScanTime.TotalSeconds;
+        }
+        logger.LogInformation("Ngân sách quét regex: tối đa {sec:0.#} s/file", maxScanSeconds);
+        var scanner = new RegexScanner(patterns, rulesVer, minConfidence, TimeSpan.FromSeconds(maxScanSeconds));
         var engine = new ClassificationEngine(logger, ruleFolder); // [Thay đổi] Tách lõi bước 1: truyền thư mục rule cho module compound
         // [Thay đổi] Router ba vùng: đọc mục "Score" { THigh, TLow }; thiếu hoặc sai (TLow ≥ THigh, ngoài 0-1) thì dùng
         // mặc định 0,90/0,30 + cảnh báo, không chặn service khởi động

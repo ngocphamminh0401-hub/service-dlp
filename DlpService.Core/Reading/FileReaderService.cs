@@ -362,4 +362,11 @@ public static class IncompleteReasons
     // [Thay đổi] H4
     /// <summary>File vượt giới hạn tài nguyên khi đọc (VD ngân sách giải nén ZIP) — không đọc được gì.</summary>
     public const string LimitExceeded = "limit_exceeded";
+
+    // [Thay đổi] M4: lý do do tầng QUÉT đặt (Scanning.ScanResult.IncompleteReason trả đúng 2 chuỗi này)
+    /// <summary>Có rule regex quá thời gian (timeout 1 s/lần tìm) — rule đó chưa quét hết.</summary>
+    public const string RegexTimeout = "regex_timeout";
+
+    /// <summary>Hết ngân sách thời gian quét của cả file (Scan:MaxSecondsPerFile) — các rule còn lại chưa chạy.</summary>
+    public const string ScanBudget = "scan_budget";
 }

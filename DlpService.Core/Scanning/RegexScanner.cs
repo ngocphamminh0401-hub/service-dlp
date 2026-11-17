@@ -22,12 +22,25 @@ public class RegexScanner
     /// cho code cũ/test chưa cần theo dõi.</param>
     /// <param name="minConfidence">[Thay đổi] Công thức Go: ngưỡng điểm tối thiểu (mặc định 0,60 như Go); ngoài 0-1
     /// thì bị chặn về 0-1.</param>
-    public RegexScanner(List<SensitivePattern> patterns, string rulesVer = "", double minConfidence = CandidateScorer.DefaultMinConfidence)
+    /// <param name="maxScanTime">[Thay đổi] M4: ngân sách thời gian quét CẢ 1 file (mọi rule cộng lại); null = <see cref="DefaultMaxScanTime"/>.
+    /// Giá trị ≤ 0 → mặc định.</param>
+    public RegexScanner(List<SensitivePattern> patterns, string rulesVer = "", double minConfidence = CandidateScorer.DefaultMinConfidence,
+        TimeSpan? maxScanTime = null)
     {
         _patterns = patterns;
         RulesVer = rulesVer;
         MinConfidence = Math.Clamp(minConfidence, 0, 1);
+        MaxScanTime = maxScanTime is { } t && t > TimeSpan.Zero ? t : DefaultMaxScanTime;
     }
+
+    // [Thay đổi] M4: timeout 1 s của .NET áp cho TỪNG lần tìm 1 chỗ khớp (mỗi bước NextMatch), không cho cả Matches() — trước đây 1 file có N đoạn
+    // "gần timeout" tốn N × ~1 s cho MỖI rule mà không bao giờ ném timeout. Ngân sách này là trần cho cả file. Bình thường file lớn nhất
+    // (2.000.000 ký tự) mất ~0,7 s (docs/bao-cao-hieu-nang-service-dlp.md) → 10 s dư ~14 lần.
+    /// <summary>Ngân sách mặc định cho 1 file.</summary>
+    public static readonly TimeSpan DefaultMaxScanTime = TimeSpan.FromSeconds(10);
+
+    /// <summary>Ngân sách thời gian quét 1 file. Trần thực tế ≤ giá trị này + 1 lần tìm match dở dang (timeout 1 s/match của rule).</summary>
+    public TimeSpan MaxScanTime { get; }
 
     // [Thay đổi] Công thức Go: CVV và ngày hết hạn (MM/YY, MM/YYYY) — bản C# của cvvPattern/expiryPattern trong regex.go.
     // Dùng [0-9] thay \d vì \d của .NET khớp cả chữ số Unicode khác (Go RE2 chỉ khớp 0-9).
@@ -90,13 +103,29 @@ public class RegexScanner
         // trong chỗ khớp của Go). Chỉ dùng cho counter, không đổi kết quả quét.
         var validatorRejectedSpans = new List<(int Start, int End)>();
 
+        // [Thay đổi] M4: deadline kiểm tra "hợp tác" — .NET không ngắt được 1 lệnh regex từ bên ngoài, nên kiểm Elapsed (~20 ns) ở các điểm vòng lặp
+        // quay lại: trước mỗi rule, sau MỖI chỗ khớp, và trong vòng chế độ bảng. Hết ngân sách → dừng hẳn, các bước sau chạy trên chỗ khớp đã có.
+        var budget = System.Diagnostics.Stopwatch.StartNew();
+        bool budgetExceeded = false;
+
         foreach (var pattern in _patterns)
         {
+            if (budget.Elapsed > MaxScanTime)
+            {
+                budgetExceeded = true;
+                break;
+            }
             try
             {
                 // Matches() trả về tất cả chỗ khớp của pattern này trong content
                 foreach (Match match in pattern.Regex.Matches(content))
                 {
+                    if (budget.Elapsed > MaxScanTime) // [Thay đổi] M4: chặn rule có rất nhiều chỗ khớp chậm (mỗi chỗ chưa tới timeout)
+                    {
+                        budgetExceeded = true;
+                        break;
+                    }
+
                     // [Thay đổi] Nếu rule có validator mà chỗ khớp không qua được (ví dụ sai Luhn) thì bỏ qua
                     if (pattern.Validator != null && !pattern.Validator(match.Value))
                     {
@@ -165,11 +194,20 @@ public class RegexScanner
                 // mức. Các chỗ khớp của rule này tìm được trước lúc timeout vẫn nằm trong survivors.
                 timedOut.Add(pattern.Name);
             }
+            if (budgetExceeded)
+            {
+                break; // [Thay đổi] M4: thoát luôn vòng rule (break ở trên chỉ thoát vòng chỗ khớp)
+            }
         }
 
         // [Thay đổi] Bậc 3 #2: xét chế độ bảng cho các chỗ khớp đã trượt proximity (xem giải thích ở khai báo deferred)
         foreach (var (pattern, match) in deferred)
         {
+            if (budget.Elapsed > MaxScanTime) // [Thay đổi] M4: mỗi phần tử deferred quét Contains trên CẢ content
+            {
+                budgetExceeded = true;
+                break;
+            }
             bool looksLikeTable = candidateCounts.GetValueOrDefault(pattern.Name) >= TableModeMinMatches;
             if (looksLikeTable && ProximityKeywords(pattern).Any(k => content.Contains(k, StringComparison.OrdinalIgnoreCase)))
             {
@@ -335,11 +373,15 @@ public class RegexScanner
 
         // [Thay đổi] Log timeout: trả kèm danh sách rule bị timeout
         // [Thay đổi] FileConfidence 2 nhánh: trả kèm counter near-miss
+        // [Thay đổi] M4: quét chưa trọn → bỏ telemetry (chỉ phục vụ FileConfidence, mà pipeline không tính FileConfidence cho file chưa quét trọn)
+        // — đỡ thêm 1 lượt dò từ khoá trên cả content đúng lúc đã hết ngân sách.
+        bool complete = timedOut.Count == 0 && !budgetExceeded;
         return new ScanResult
         {
             Matches = results,
             TimedOutPatterns = timedOut.ToList(),
-            Telemetry = BuildTelemetry(content, results, proximityRejects, gateDowngrades, validatorRejectedSpans)
+            BudgetExceeded = budgetExceeded, // [Thay đổi] M4
+            Telemetry = complete ? BuildTelemetry(content, results, proximityRejects, gateDowngrades, validatorRejectedSpans) : ScanTelemetry.Empty
         };
     }
 

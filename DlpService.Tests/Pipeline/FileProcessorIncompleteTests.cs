@@ -33,7 +33,8 @@ public sealed class FileProcessorIncompleteTests : IDisposable
         try { Directory.Delete(_work, recursive: true); } catch (IOException) { } catch (UnauthorizedAccessException) { }
     }
 
-    private FileProcessor Processor()
+    // [Thay đổi] M4: + validatorSleepMs (mô phỏng mỗi chỗ khớp tốn thời gian), maxScanTime, rulesVer
+    private FileProcessor Processor(int validatorSleepMs = 0, TimeSpan? maxScanTime = null, string rulesVer = "rv1")
     {
         var cccd = new SensitivePattern
         {
@@ -42,10 +43,12 @@ public sealed class FileProcessorIncompleteTests : IDisposable
             Regex = new Regex(@"\b\d{12}\b", RegexOptions.None, TimeSpan.FromSeconds(1)),
             Severity = "RESTRICTED",
             Category = "pii",
-            Confidence = 0.95
+            Confidence = 0.95,
+            Validator = validatorSleepMs > 0 ? _ => { Thread.Sleep(validatorSleepMs); return true; } : null
         };
         IPathPolicy policy = new CaseInsensitivePathPolicy();
-        return new FileProcessor(new FileReaderService(policy), new RegexScanner([cccd], "rv1"), new ClassificationEngine(NullLogger.Instance),
+        return new FileProcessor(new FileReaderService(policy), new RegexScanner([cccd], rulesVer, maxScanTime: maxScanTime),
+            new ClassificationEngine(NullLogger.Instance),
             NullLogger.Instance, new RouterOptions(), _store, new EscalationOptions(), fileConfidence: null, Path.GetFileName, policy);
     }
 
@@ -143,6 +146,26 @@ public sealed class FileProcessorIncompleteTests : IDisposable
         Assert.Equal("0", Col(file, "jobs"));
 
         Assert.Equal(ProcessOutcome.Unchanged, Processor().ProcessFile(file)); // không mở lại mỗi lượt đối soát
+    }
+
+    // [Thay đổi] M4: hết ngân sách quét → incomplete (scan_budget) CÓ cache, thay cho provisional + labels NULL (bị quét lại mọi lượt đối soát)
+    [Fact]
+    public void Het_ngan_sach_quet_thi_ghi_incomplete_co_cache_va_quet_lai_khi_rule_doi()
+    {
+        string file = Write("luong-cham.txt", string.Join("\n", Enumerable.Range(0, 60).Select(i => $"CCCD {100000000000 + i}")));
+        var budget = TimeSpan.FromMilliseconds(100); // 60 chỗ khớp × 20 ms ≈ 1,2 s > 100 ms
+
+        Assert.Equal(ProcessOutcome.Scanned, Processor(20, budget).ProcessFile(file));
+
+        Assert.Equal(ResultStore.StatusIncomplete, Col(file, "status"));
+        Assert.Equal(IncompleteReasons.ScanBudget, Col(file, "incomplete_reason"));
+        Assert.NotEqual("", Col(file, "labels_json")); // khác NULL → có cache
+        Assert.DoesNotContain("\"Public\"", Col(file, "labels_json"));
+        Assert.Equal("1", Col(file, "needs_review"));
+        Assert.Equal("0", Col(file, "jobs"));
+
+        Assert.Equal(ProcessOutcome.Unchanged, Processor(20, budget).ProcessFile(file));             // không quét lại liên tục
+        Assert.Equal(ProcessOutcome.Scanned, Processor(20, budget, rulesVer: "rv2").ProcessFile(file)); // rule đổi → quét lại (H1)
     }
 
     [Fact]

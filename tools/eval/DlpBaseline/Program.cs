@@ -223,6 +223,11 @@ internal static class BaselineRunner
         // [Thay đổi] Log timeout: ghi tên rule bị timeout. Mức dự đoán vẫn tính từ các chỗ khớp tìm được (để đo), nhưng
         // báo cáo đếm riêng số file quét chưa trọn — service thật sẽ KHÔNG gắn mức cho những file này.
         string timedOutRules = string.Join(';', scan.TimedOutPatterns);
+        // [Thay đổi] M4: hết ngân sách cả file cũng là "quét chưa trọn" — ghi mã vào CÙNG cột (giữ nguyên cấu trúc CSV cho các script đang đọc)
+        if (scan.BudgetExceeded)
+        {
+            timedOutRules = timedOutRules.Length == 0 ? "(scan_budget)" : timedOutRules + ";(scan_budget)";
+        }
 
         // [Thay đổi] S1 giai đoạn 2: tính S1 bằng ĐÚNG code của service (FileScorer), không tính vào thời gian phân loại
         var s1 = FileScorer.Compute(matches, content.Length);

@@ -14,8 +14,17 @@ public class ScanResult
     /// <summary>Tên các rule bị quá thời gian (RegexMatchTimeoutException) trong lần quét này, không trùng lặp.</summary>
     public required IReadOnlyList<string> TimedOutPatterns { get; init; }
 
+    // [Thay đổi] M4: hết ngân sách thời gian của CẢ file (RegexScanner.MaxScanTime) → dừng giữa chừng, các rule còn lại chưa chạy
+    /// <summary>true nếu lần quét dừng vì hết ngân sách thời gian của cả file (chưa chạy hết mọi rule).</summary>
+    public bool BudgetExceeded { get; init; }
+
     /// <summary>true nếu MỌI rule đều quét xong; false thì kết quả chưa đủ căn cứ để kết luận mức nhạy cảm.</summary>
-    public bool IsComplete => TimedOutPatterns.Count == 0;
+    public bool IsComplete => TimedOutPatterns.Count == 0 && !BudgetExceeded; // [Thay đổi] M4: + BudgetExceeded
+
+    // [Thay đổi] M4: mã lý do để pipeline ghi scan_result.incomplete_reason (cùng bộ mã Reading.IncompleteReasons). Hết ngân sách được ưu tiên
+    // báo vì nó là nguyên nhân dừng cả lần quét.
+    /// <summary>"scan_budget" / "regex_timeout"; null nếu quét trọn.</summary>
+    public string? IncompleteReason => BudgetExceeded ? "scan_budget" : TimedOutPatterns.Count > 0 ? "regex_timeout" : null;
 
     // [Thay đổi] FileConfidence 2 nhánh: counter near-miss đếm cùng lúc quét (xem ScanTelemetry)
     /// <summary>Số liệu near-miss của lần quét này.</summary>
