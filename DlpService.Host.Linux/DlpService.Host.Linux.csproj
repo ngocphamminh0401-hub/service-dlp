@@ -11,6 +11,12 @@
     <RootNamespace>DlpService.Host.Linux</RootNamespace>
   </PropertyGroup>
 
+  <!-- [Thay đổi] Vòng 5b (19/11/2026): GC ConserveMemory = 7 → bộ gom rác trả bộ nhớ sớm hơn sau khi đọc file lớn. Đo E2E (pha mixed + large, bản đã tối ưu,
+       mỗi cấu hình 2–3 lượt): RSS đỉnh trung bình ~330 MB (mặc định) → ~264 MB, thời gian cả lô không đổi (4,0–4,2 s). gcConcurrent=0 KHÔNG giúp (RSS 491 MB). -->
+  <ItemGroup>
+    <RuntimeHostConfigurationOption Include="System.GC.ConserveMemory" Value="7" />
+  </ItemGroup>
+
   <!-- [Thay đổi] GĐ2 bước 2.2d: adapter Linux + systemd nằm ở DlpService.Platform.Linux (tham chiếu bắc cầu tới Core) -->
   <ItemGroup>
     <ProjectReference Include="..\DlpService.Core\DlpService.Core.csproj" />
