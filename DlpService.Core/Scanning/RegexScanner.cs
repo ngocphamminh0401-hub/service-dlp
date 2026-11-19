@@ -11,6 +11,14 @@ public class RegexScanner
     // [Thay đổi] Tối ưu A2: tập mọi từ khoá của bộ rule (+ từ khoá "tài liệu mẫu") dựng 1 lần; mỗi file tạo 1 Presence để tra "từ khoá có trong file không"
     private readonly KeywordUniverse _keywordUniverse;
 
+    // [Thay đổi] Tối ưu P1: ký tự BẮT BUỘC của từng pattern (VD '@' của email), phân tích bảo thủ một lần lúc tạo scanner. _requiredIdx[i] là chỉ số các ký tự
+    // của pattern thứ i trong _requiredDistinct (mảng ký tự khác nhau của cả bộ rule). Mỗi Scan tính 1 lần "file có ký tự đó không"; thiếu → bỏ qua pattern.
+    private readonly char[] _requiredDistinct;
+    private readonly int[][] _requiredIdx;
+
+    /// <summary>[Thay đổi] Tối ưu P1: bật/tắt việc bỏ qua pattern theo ký tự bắt buộc. Chỉ để test đối chiếu "bật = tắt"; service luôn bật.</summary>
+    internal bool PrefilterEnabled { get; set; } = true;
+
     // [Thay đổi] Merger mục 7.4 "Lưu vết": rules_ver ghi kèm scan_result để biết kết quả được tính bằng bộ rule nào.
     /// <summary>Phiên bản bộ rule đang dùng (RuleLoader.ComputeRulesVersion), rỗng nếu không truyền lúc tạo scanner.</summary>
     public string RulesVer { get; }
@@ -31,6 +39,9 @@ public class RegexScanner
         TimeSpan? maxScanTime = null)
     {
         _patterns = patterns;
+        var required = patterns.Select(p => RegexRequiredChars.Analyze(p.Regex.ToString(), p.Regex.Options)).ToArray();
+        _requiredDistinct = required.SelectMany(r => r).Distinct().ToArray();
+        _requiredIdx = required.Select(r => r.Select(c => Array.IndexOf(_requiredDistinct, c)).ToArray()).ToArray();
         _keywordUniverse = new KeywordUniverse(patterns
             .SelectMany(p => p.Keywords.Concat(p.PrimaryKeywords).Concat(p.SecondaryKeywords))
             .Concat(DocContextProbeKeywords));
@@ -115,12 +126,25 @@ public class RegexScanner
         var budget = System.Diagnostics.Stopwatch.StartNew();
         bool budgetExceeded = false;
 
+        bool[]? requiredPresent = null; // [Thay đổi] Tối ưu P1: tính lười, 1 lượt IndexOf cho mỗi ký tự bắt buộc
+        int patternIndex = -1;
         foreach (var pattern in _patterns)
         {
+            patternIndex++;
             if (budget.Elapsed > MaxScanTime)
             {
                 budgetExceeded = true;
                 break;
+            }
+            // [Thay đổi] Tối ưu P1: pattern cần ký tự (VD '@') mà file không có → chắc chắn 0 khớp → bỏ qua, kết quả KHÔNG đổi (không có khớp nào thì cũng
+            // không sinh validatorRejectedSpans, candidateCounts, proximityRejects, survivors).
+            if (PrefilterEnabled && patternIndex < _requiredIdx.Length && _requiredIdx[patternIndex].Length > 0)
+            {
+                requiredPresent ??= _requiredDistinct.Select(ch => content.Contains(ch)).ToArray();
+                if (_requiredIdx[patternIndex].Any(k => !requiredPresent[k]))
+                {
+                    continue;
+                }
             }
             try
             {
