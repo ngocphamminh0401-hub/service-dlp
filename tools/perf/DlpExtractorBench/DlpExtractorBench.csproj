@@ -1,0 +1,21 @@
+<!-- [Thay đổi] File mới (Benchmark T05): đo FileReaderService tách từng bước (sniff / extract / ToString / NFC / hash) cho F1–F7.
+     Chỉ gọi API public của Core, KHÔNG sửa Core. -->
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>DlpExtractorBench</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\..\DlpService.Core\DlpService.Core.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Compile Include="..\shared\BenchCommon.cs" Link="BenchCommon.cs" />
+  </ItemGroup>
+
+</Project>

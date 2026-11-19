@@ -1,0 +1,868 @@
+.env
+2FA
+3 tuyến bảo vệ
+3-digit
+4-digit
+@vinaphone.vn
+@vnpt-i.vn
+@vnpt-net.vn
+@vnpt.vn
+@vnptmedia.vn
+ABBANK
+ACB
+AKIA
+AKID
+AML
+AUM
+AWS_ACCESS_KEY_ID
+AWS_SECRET
+Agribank
+Amex
+BBAN
+BEGIN PRIVATE KEY
+BEGIN RSA PRIVATE KEY
+BHXH
+BHXH tự nguyện
+BHYT
+BIC
+BIC code
+BIDV
+Bac A Bank
+BÍ MẬT
+Bạch kim
+CCCD
+CID
+CIF
+CMND
+CMND/CCCD
+CONFIDENTIAL
+CSC
+CSKH
+CTK
+CVC
+CVC2
+CVV
+CVV2
+Công giáo
+DHCP
+DNS
+DOB
+EUR
+Eximbank
+FaceID
+GBP
+GTGT
+HDBank
+IBAN
+ICD
+ID number
+IP address
+JCB
+Kienlongbank
+Kim cương
+Kinh
+LAN
+LienVietPostBank
+MB Bank
+MRZ
+MSB
+MSDN
+MST
+MST cá nhân
+Mastercard
+Mường
+MẬT
+NDA
+Nam A Bank
+Napas
+OCB
+OTP
+OTP code
+PAN
+PASSPORT NO
+PGBank
+PIN
+Phật giáo
+RESTRICTED
+SHB
+SMS
+STK
+SWIFT code
+Sacombank
+SeABank
+SĐT
+TIN
+TIN cá nhân
+TNCN
+TNDN
+TOP SECRET
+TPBank
+Tax ID
+Tax No
+Techcombank
+Thái
+TouchID
+Tày
+TỐI MẬT
+USD
+VAT
+VIB
+VIP1
+VIP2
+VISA Platinum
+VNPT
+VNPT Technology
+VNPT-I
+VNeID
+VPBank
+VPN
+Viber
+Vietcombank
+Vietinbank
+VinaPhone
+Visa
+WAN
+Zalo/Viber
+access control
+access_token
+account number
+account_no
+account_number
+acct_no
+agreement
+all staff
+annex
+anti-spoofing
+api
+api_key
+appendix
+auth
+authentication
+authorization
+aws_access_key
+ba tuyến bảo vệ
+ban giám đốc
+ban kiểm tra nội bộ
+ban nghiệp vụ
+ban phê duyệt
+ban quản lý rủi ro
+ban vận hành
+bank account
+bank code
+bank identifier
+bearer
+beneficiary
+biometric
+birth certificate
+birthdate
+birthday
+biên bản họp
+biên bản xác minh
+biên bản điều tra tai nạn lao động
+biểu mẫu
+biện pháp bảo vệ tạm thời
+bonus
+born
+breach
+business registration number
+bàn giao tài sản
+bác sĩ
+bác sĩ trực
+báo cáo
+báo cáo doanh số
+báo cáo giao dịch đáng ngờ
+báo cáo kinh doanh tổng hợp
+báo cáo thống kê nhân sự
+báo cáo tuân thủ
+báo cáo tổng hợp
+báo giá
+bên ký
+bí mật nhà nước
+bí mật thương mại
+bí thư chi bộ
+bản mô tả công việc
+bản đồ
+bảng chấm công
+bảng hướng dẫn quy trình
+bảng lương
+bảng tổng hợp doanh số
+bảo hiểm thất nghiệp
+bảo hiểm xã hội
+bảo hiểm y tế
+bảo mật
+bảo mật thông tin
+bảo mật tuyệt đối
+bệnh nhân
+bệnh viện
+bệnh án
+bồi thường
+bộ phận
+cam kết
+cam kết bảo mật
+card number
+card security code
+card verification
+cardholder
+cell
+cell tower
+cha đẻ
+change request
+chat nội bộ - phòng
+chi bộ
+chi cục thuế
+chi nhánh
+chi nhánh, phòng giao dịch
+chi trả bảo hiểm
+chip CCCD
+chuyển khoản
+chuyển khoản thành công
+chuyển tiền quốc tế
+chính sách hoa hồng
+chính sách quản lý rủi ro
+chưa công bố
+chưa kiểm toán
+chấm công
+chấm dứt
+chẩn đoán
+chế độ đãi ngộ
+chỉ lưu hành nội bộ
+chỉ tiêu kinh doanh
+chống giả mạo
+chủ sở hữu
+chủ thẻ
+chủ tài khoản
+chủ tịch công đoàn
+chứng minh nhân dân
+chứng minh thư
+chứng từ nghỉ chế độ
+chữ ký
+circulation
+claim
+classification level
+client_secret
+clinic
+commission
+company confidential
+conditions
+config
+connection string
+contact
+contract
+contract no
+corebanking
+correspondent
+correspondent bank
+credentials
+credit card
+cách kiểm tra
+cán bộ VNPT
+cán bộ, nhân viên
+có giá trị đến
+công ty bảo hiểm
+công đoàn
+công đoàn cơ sở
+căn cước
+căn cước công dân
+căn cước gắn chip
+cơ quan công an
+cơ quan điều tra
+cấp ngày
+cấp phê duyệt
+cấp trên
+cấp ủy
+cần bổ sung xác minh
+cố vấn pháp lý
+cục thuế
+cực mật
+danh mục thuốc
+danh sách khách hàng
+danh sách khách hàng VIP
+database
+date of birth
+date of expiry
+date of issue
+debit card
+di chuyển
+di động
+diagnosis
+do not distribute
+doctor
+dân tộc
+dư nợ cho vay
+dư nợ cuối kỳ
+dự phòng rủi ro tín dụng
+dự thảo
+e-mail
+eID
+ePassport
+effective date
+email
+email nội bộ
+embedding
+employee
+employment contract
+endpoint
+expiry
+ext
+eyes only
+face recognition
+fax
+fingerprint
+firewall
+first name
+for internal use only
+foreign bank
+full name
+gateway
+geolocation
+ghi có
+ghi nợ
+gian lận
+giao dịch bất thường
+giao dịch viên
+giao dịch viên mới
+giao dịch đáng ngờ
+giám định y khoa
+giám đốc
+giải trình lý do
+giấy chứng nhận đăng ký
+giấy khai sinh
+giấy phép kinh doanh
+giấy tờ tùy thân
+giấy xác nhận nghỉ ốm
+giọng nói
+grant_type
+gọi
+gửi mail
+health insurance
+health record
+highly sensitive
+hiệu lực
+hiệu suất công việc
+hoa hồng
+hoa hồng đại lý
+hospital
+host
+hotline
+hotline nội bộ
+hoàn thuế
+hoàn thuế TNCN
+hành khách
+hành trình
+hóa đơn
+hưu trí
+hướng dẫn nội bộ
+hướng dẫn quy trình
+hạn chế
+hạn chế lưu hành
+hạn chế phổ biến
+hạn chế tối đa
+hạn mức
+hạn mức phê duyệt
+hạn mức tín dụng
+hạng khách hàng
+hậu kiểm định kỳ
+hệ thống nội bộ
+hệ thống điện tử
+họ tên
+họ tên đầy đủ
+họ và tên
+học sinh
+họp giao ban
+hồ sơ bệnh án
+hồ sơ cá nhân
+hồ sơ kỷ luật
+hồ sơ nhân sự
+hỗ trợ điều tra
+hộ chiếu
+hộ khẩu thường trú
+hội thảo chuyên môn nội bộ
+hội đồng kỷ luật
+hội đồng thuốc và điều trị
+hội đồng tín dụng
+hội đồng đánh giá
+hộp thư
+hợp đồng
+hợp đồng bảo hiểm
+hợp đồng bảo mật
+hợp đồng dịch vụ
+hợp đồng lao động
+hợp đồng mua bán
+hợp đồng số
+identity
+inbox
+incident
+income
+internal
+internal network
+internal only
+internal use only
+international bank account
+international transfer
+iris
+key
+khai sinh
+khoa
+khoản vay nội bộ
+khung lương theo cấp bậc
+khuyến nghị của bác sĩ
+khuôn mặt
+khách hàng
+khách hàng VIP
+khách hàng ưu tiên
+khám bệnh
+khám lâm sàng
+khám nghiệm tử thi
+khám sức khỏe định kỳ
+không chia sẻ ra bên ngoài
+không có dấu hiệu bất thường
+không phổ biến
+không phổ biến ra ngoài
+không được sao chép
+khả năng thanh toán
+khả năng trả nợ
+khấu trừ thuế
+khẩu vị rủi ro
+khối kiểm soát rủi ro
+khối vận hành
+khởi kiện
+khởi tố
+kiểm soát nhiễm khuẩn
+kiểm soát nội bộ
+kiểm soát trục lợi
+kiểm soát đặc biệt
+kiểm tra lại thông tin tài khoản
+kiểm tra nội bộ
+kpi
+kê khai thuế
+ký duyệt
+ký tên
+kế hoạch công tác
+kế hoạch kinh doanh
+kế hoạch tuyển dụng
+kế hoạch đào tạo
+kết luận của bác sĩ
+kết luận lịch sử chính trị
+kết luận xử lý
+kết quả cận lâm sàng
+kết quả xét nghiệm
+kịch bản tư vấn
+kỳ báo cáo
+lab result
+last name
+latitude
+liveness
+liên hệ
+liên lạc
+login
+longitude
+lãi suất trả chậm
+lý do sa thải
+lý lịch
+lý lịch chính trị
+lưu hành
+lưu hành hạn chế
+lưu hành nội bộ
+lưu hành nội bộ hạn chế
+lưu hồ sơ
+lương
+lương gross
+lương hưu
+lương net
+lịch giao ban
+lịch sử di chuyển
+lịch sử giao dịch
+lịch trực gác
+lịch trực khoa
+lợi nhuận trước thuế
+machine readable
+map
+medical
+medical history
+minh họa quyền lợi
+mobile
+mã CIF
+mã OTP
+mã PIN giao dịch
+mã bảo mật
+mã bảo mật giao dịch
+mã doanh nghiệp
+mã dự án
+mã giao dịch tham chiếu
+mã hợp đồng
+mã nv
+mã swift
+mã số cá nhân
+mã số doanh nghiệp
+mã số kinh doanh
+mã số thuế
+mã số thuế cá nhân
+mã xác thực giao dịch
+mã định danh
+mạng nội bộ
+mật khẩu
+mẹ đẻ
+mống mắt
+mức lương
+mức lương cơ bản
+mức lương đề xuất
+mức đóng
+national ID
+nationality
+need to know
+network diagram
+nghi ngờ gian lận
+nghi vấn gian lận
+nghiêm cấm tiết lộ thông tin khách hàng
+nghĩa vụ
+nghỉ điều trị nội trú
+nguyên nhân tử vong
+ngày cấp
+ngày hết hạn
+ngày kết nạp
+ngày sinh
+ngày sinh nhật
+ngày sinh:
+ngày tháng năm sinh
+ngày đến hạn thanh toán
+ngân hàng
+ngân hàng nhà nước
+ngân hàng nước ngoài
+ngân hàng thụ hưởng
+ngân hàng đại lý
+ngân sách tuyển dụng
+ngân sách đào tạo
+người bị nạn
+người bị phản ánh
+người dùng
+người ký
+người lập
+người phê duyệt
+người soạn thảo
+người thụ hưởng
+người đại diện
+nhân viên
+nhân viên VNPT
+nhượng tái bảo hiểm
+nhạy cảm cao
+nhận dạng khuôn mặt
+nhận dạng sinh trắc
+nhận lương
+nhập viện
+nhật ký giao dịch
+nhật ký đăng nhập
+nhắn tin
+non-disclosure
+năm sinh
+năm sinh:
+nơi cấp
+nơi sinh
+nơi thường trú
+nếu quý khách không thực hiện giao dịch này
+nội bộ
+nội bộ VNPT
+nội dung bảo mật
+nộp tiền
+oauth
+oauth2
+obligation
+one-time password
+passport
+passport number
+passwd
+password
+patient
+pay slip
+payroll
+payslip
+penalty
+personal income tax
+personal tax
+phiếu khám sức khỏe
+phiếu lương
+phone
+phát hành
+phân loại
+phân loại sức khỏe
+phân loại tài liệu
+phân tầng mức độ rủi ro
+phê duyệt
+phê duyệt hồ sơ vay
+phê duyệt khoản vay
+phí bảo hiểm
+phòng ban
+phòng chống rửa tiền
+phòng khách hàng ưu tiên
+phòng khám
+phòng lao động
+phòng nghiệp vụ giao dịch
+phòng nhân sự
+phòng pháp chế
+phòng quản lý giao dịch
+phòng quản lý giám sát
+phòng tín dụng
+phòng vận hành
+phòng đào tạo
+phẫu thuật
+phụ cấp
+phụ lục
+phục vụ điều tra
+place of birth
+prescription
+private and confidential
+private_key
+private_key_id
+project code
+proprietary
+purchase order
+quan hệ chính trị - xã hội
+quotation
+quy chế bảo mật hồ sơ bệnh án
+quy chế hoạt động
+quy trình hoạt động
+quy trình nghiệp vụ
+quy trình nội bộ
+quy trình phê duyệt
+quy trình số
+quy trình tiếp nhận bệnh nhân
+quy trình tiếp nhận khoa
+quy trình vận hành
+quy trình vận hành khoa
+quy trình xử lý
+quy trình đánh giá hiệu suất
+quy trình đánh giá năng lực
+quy định nội bộ
+quy định về bảo mật thông tin
+quyết toán thuế
+quyết định sa thải
+quyền và nghĩa vụ
+quê quán
+quản lý trực tiếp
+quấy rối tình dục
+quốc tịch
+refresh_token
+router
+routing
+routing code
+rsa
+rút tiền
+rút tiền ATM
+rối loạn tâm lý
+rủi ro tín dụng
+rửa tiền
+salary
+sao kê thẻ tín dụng
+sao kê tài khoản
+scope
+secret
+security classification
+security code
+server
+server IP
+service_account_key
+sinh ngày
+sinh năm
+sinh ra
+sinh trắc học
+sinh viên
+sk_live
+sk_test
+so_tai_khoan
+social insurance
+social security
+strictly confidential
+subnet
+surgery
+swift
+swift/bic
+sđt nội bộ
+sơ yếu lý lịch
+sơ đồ mạng
+số BHXH
+số CCCD
+số TK
+số Zalo
+số dư
+số dư cuối kỳ
+số dư huy động
+số dư khả dụng sau giao dịch
+số dư đầu kỳ
+số hiệu thông báo
+số hộ chiếu
+số hộ chiếu:
+số hợp đồng
+số liệu kinh doanh
+số lượng cuối kỳ
+số lượng đầu kỳ
+số máy
+số máy lẻ
+số nội bộ
+số thẻ
+số thẻ BHYT
+số tiền thanh toán tối thiểu
+số tài khoản
+số điện thoại
+số định danh
+số định danh cá nhân
+số định danh quốc gia
+sổ BHXH
+sức khỏe
+tai nạn lao động
+tax code
+tax identification
+tax identification number
+tel
+template
+termination
+terms
+thai sản
+thay đổi quy trình
+theo dõi vị trí
+thoả thuận bảo mật
+thu nhập
+thu nhập chịu thuế
+thuế thu nhập cá nhân
+thuế thu nhập doanh nghiệp
+thuốc
+thành phần gia đình
+thành phần tham dự
+thông báo lịch họp
+thông báo lịch nghỉ lễ
+thông báo nội bộ chung
+thông tin cá nhân
+thông tin mật
+thông tin độc quyền
+thù lao
+thư mời nhận việc
+thư điện tử
+thưởng
+thưởng doanh số
+thẩm tra xác minh lý lịch
+thẩm định bảo hiểm
+thẩm định hồ sơ vay
+thẩm định rủi ro
+thẩm định sức khỏe
+thẻ BHYT
+thẻ căn cước
+thẻ ghi nợ
+thẻ tín dụng
+thỏa thuận
+thỏa thuận bảo mật
+thống kê hoạt động khám chữa bệnh
+thời hạn lưu trữ hồ sơ bệnh án
+thử việc
+ticket
+tiêu chí đánh giá rủi ro
+tiền sử bệnh
+tiền sự
+tiền án
+token
+topology
+toàn thể nhân viên
+tranh chấp bảo hiểm
+trao đổi nội bộ
+travel document
+treatment
+trung tâm đào tạo
+trình ban lãnh đạo
+trích lập dự phòng
+trưởng khoa
+trưởng nhóm
+trưởng phòng
+trợ cấp
+trục lợi bảo hiểm
+tuyệt mật
+tuổi
+tài khoản
+tài khoản nguồn
+tài khoản ngân hàng
+tài khoản thanh toán
+tài khoản thụ hưởng
+tài khoản tiết kiệm
+tài liệu
+tài liệu du lịch
+tài liệu mật
+tài liệu đính kèm
+tên chủ thẻ
+tên khách hàng
+tên người dùng
+tên nhân viên
+tên đầy đủ
+tín ngưỡng
+tính hợp lệ về giấy tờ
+tôn giáo
+tập đoàn VNPT
+tọa độ GPS
+tổ xác minh
+tổng doanh thu
+tổng tài sản quản lý
+tờ trình
+tử tuất
+tỷ lệ hoa hồng
+tỷ lệ hoàn thành chỉ tiêu
+tỷ lệ thương tật
+underwriting
+valid thru
+vi phạm
+vi phạm quy chế
+viện kiểm sát
+vnpt media
+vnpt net
+vnpt-net
+vnptmedia
+voice recognition
+vân tay
+văn bản hướng dẫn chi tiết
+vật tư y tế
+vị trí
+wire transfer
+xuất nhập cảnh
+xuất viện
+xác nhận giao dịch
+xác nhận đồng ý nhận việc
+xác thực
+xác thực 2 yếu tố
+xác thực chứng từ
+xác thực giao dịch
+xác thực số điện thoại
+xét kết nạp đảng
+xét nghiệm
+xử lý kỷ luật
+y tế
+yêu cầu bồi thường
+zalo
+án tích
+điều dưỡng trực
+điều khoản
+điều tra gian lận
+điều trị
+điện thoại
+đoàn tncs hồ chí minh
+đoàn viên
+đoàn viên công đoàn
+đào tạo chuyên môn nội bộ
+đào tạo đại lý
+đính kèm hợp đồng lao động
+đón tiếp khách hàng
+đóng bảo hiểm
+đóng dấu mật
+đăng ký kinh doanh
+đăng nhập
+đơn khiếu nại
+đơn thuốc
+đơn vị
+đơn đặt hàng
+đại diện pháp luật
+đại lý
+đạt yêu cầu
+đảng viên
+đảng ủy
+đề xuất
+địa chỉ IP
+địa chỉ email
+địa chỉ thư
+định danh sinh trắc
+định danh điện tử
+định phí
+định vị
+ốm đau

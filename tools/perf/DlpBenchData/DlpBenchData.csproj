@@ -1,0 +1,22 @@
+<!-- [Thay đổi] File mới (Benchmark T02): sinh dataset tổng hợp cho benchmark (D-clean, D-kw, D-csv, D-match, D-txt, D-office, D-pdf,
+     danh sách D-burst). Tham chiếu Core để kiểm lại từng file bằng đúng FileReaderService + RegexScanner của service. -->
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>DlpBenchData</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\..\DlpService.Core\DlpService.Core.csproj" />
+  </ItemGroup>
+
+  <!-- Dùng lại bộ ghi docx/pptx/csv/eml của DlpSizeBench (không chép code). PDF tự dựng ở PdfWriter.cs vì Writers.Pdf cần font Windows. -->
+  <ItemGroup>
+    <Compile Include="..\..\eval\DlpSizeBench\Writers.cs" Link="Writers.cs" />
+  </ItemGroup>
+
+</Project>
