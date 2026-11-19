@@ -32,7 +32,8 @@ public class TxtExtractor : IContentExtractor
         // Txt không có khái niệm sheet/heading → mỗi dòng chỉ là 1 đoạn văn bản (Paragraph), không có ContextPath
         string text = TextFileReader.ReadAll(stream);
         // Tách theo "\r\n" hoặc "\n" (không tách theo từng ký tự) để không sinh dòng rỗng thừa do "\r\n" bị chẻ đôi
-        foreach (var line in text.Split(["\r\n", "\n"], StringSplitOptions.None))
+        // [Thay đổi] Tối ưu B5: SplitLines (lười, cùng kết quả Split) — không dựng mảng mọi dòng một lúc
+        foreach (var line in TextFileReader.SplitLines(text))
         {
             yield return new ContentBlock(BlockKind.Paragraph, line, ContextPath: []);
         }

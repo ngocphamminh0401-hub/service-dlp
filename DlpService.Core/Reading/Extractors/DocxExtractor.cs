@@ -43,9 +43,11 @@ public class DocxExtractor : IContentExtractor
         using var document = WordprocessingDocument.Open(stream, isEditable: false);
         var main = document.MainDocumentPart ?? throw new InvalidDataException("File .docx không có phần nội dung chính");
 
-        if (main.Document?.Body is { } body)
+        // [Thay đổi] Tối ưu B3 (Vòng 4b): thân văn bản đọc kiểu SAX (XmlReader) — KHÔNG nạp cây DOM của document.xml (XML 20 MB → RSS +176 MB).
+        // Kết quả giống hệt bản DOM cũ (test DocxStreamingEquivalenceTests so từng block). Header/footer/chú thích nhỏ nên vẫn đọc bằng DOM bên dưới.
+        using (var bodyReader = DocxBodyStreamReader.CreateReader(main.GetStream()))
         {
-            foreach (var block in AppendBlocks(body, [], depth: 0))
+            foreach (var block in DocxBodyStreamReader.ReadBody(bodyReader))
             {
                 yield return block;
             }

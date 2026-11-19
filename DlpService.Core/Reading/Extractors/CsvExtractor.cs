@@ -32,12 +32,13 @@ public class CsvExtractor : IContentExtractor
     public IEnumerable<ContentBlock> Extract(Stream stream, string fileName)
     {
         string text = TextFileReader.ReadAll(stream);
-        var lines = text.Split(["\r\n", "\n"], StringSplitOptions.None);
-
+        // [Thay đổi] Tối ưu B5: tách dòng kiểu lười (cùng kết quả Split), i vẫn là số thứ tự dòng (SourceIndex)
         IReadOnlyList<string>? columnNames = null;
-        for (int i = 0; i < lines.Length; i++)
+        int i = -1;
+        foreach (var line in TextFileReader.SplitLines(text))
         {
-            var cells = ExtractorHelpers.SplitCsvLine(lines[i]);
+            i++;
+            var cells = ExtractorHelpers.SplitCsvLine(line);
             string rowText = ExtractorHelpers.JoinRow(cells);
 
             if (columnNames == null)
