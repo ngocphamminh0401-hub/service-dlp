@@ -16,6 +16,15 @@ public class RegexScanner
     private readonly char[] _requiredDistinct;
     private readonly int[][] _requiredIdx;
 
+    // [Thay đổi] Tối ưu P2: với pattern ContextRequired KHÔNG có validator, nếu file không chứa từ khoá nào của pattern thì mọi nhánh lọc đều loại hết chỗ khớp
+    // → bỏ qua cả pattern. _contextKeywords[i] = hợp các từ khoá của pattern i (Keywords + Primary + Secondary), null nếu pattern không đủ điều kiện:
+    //  - có validator: giữ nguyên vì validatorRejectedSpans còn ảnh hưởng UnstructuredNumericHits;
+    //  - tập từ khoá khác nhau giữa các pattern cùng Name: RuleHasKeyword đang cache theo Name nên kết quả phụ thuộc thứ tự → không bỏ qua cho chắc.
+    private readonly string[]?[] _contextKeywords;
+
+    /// <summary>[Thay đổi] Tối ưu P2: số pattern đủ điều kiện bị bỏ qua khi file không có từ khoá của nó (để test chống hồi quy).</summary>
+    internal int ContextSkippablePatternCount => _contextKeywords.Count(k => k != null);
+
     /// <summary>[Thay đổi] Tối ưu P1: bật/tắt việc bỏ qua pattern theo ký tự bắt buộc. Chỉ để test đối chiếu "bật = tắt"; service luôn bật.</summary>
     internal bool PrefilterEnabled { get; set; } = true;
 
@@ -42,12 +51,33 @@ public class RegexScanner
         var required = patterns.Select(p => RegexRequiredChars.Analyze(p.Regex.ToString(), p.Regex.Options)).ToArray();
         _requiredDistinct = required.SelectMany(r => r).Distinct().ToArray();
         _requiredIdx = required.Select(r => r.Select(c => Array.IndexOf(_requiredDistinct, c)).ToArray()).ToArray();
+        _contextKeywords = BuildContextKeywords(patterns);
         _keywordUniverse = new KeywordUniverse(patterns
             .SelectMany(p => p.Keywords.Concat(p.PrimaryKeywords).Concat(p.SecondaryKeywords))
             .Concat(DocContextProbeKeywords));
         RulesVer = rulesVer;
         MinConfidence = Math.Clamp(minConfidence, 0, 1);
         MaxScanTime = maxScanTime is { } t && t > TimeSpan.Zero ? t : DefaultMaxScanTime;
+    }
+
+    // [Thay đổi] Tối ưu P2: xem _contextKeywords. Tập từ khoá so không phân biệt hoa/thường, như cách so khớp từ khoá của scanner.
+    private static string[]?[] BuildContextKeywords(List<SensitivePattern> patterns)
+    {
+        static HashSet<string> KeywordSet(SensitivePattern p) =>
+            new(p.Keywords.Concat(p.PrimaryKeywords).Concat(p.SecondaryKeywords), StringComparer.OrdinalIgnoreCase);
+
+        var consistentNames = new HashSet<string>();
+        foreach (var group in patterns.GroupBy(p => p.Name))
+        {
+            var first = KeywordSet(group.First());
+            if (group.All(p => KeywordSet(p).SetEquals(first)))
+            {
+                consistentNames.Add(group.Key);
+            }
+        }
+        return patterns.Select(p => p.ContextRequired && p.Validator == null && consistentNames.Contains(p.Name)
+            ? KeywordSet(p).ToArray()
+            : null).ToArray();
     }
 
     // [Thay đổi] M4: timeout 1 s của .NET áp cho TỪNG lần tìm 1 chỗ khớp (mỗi bước NextMatch), không cho cả Matches() — trước đây 1 file có N đoạn
@@ -145,6 +175,14 @@ public class RegexScanner
                 {
                     continue;
                 }
+            }
+            // [Thay đổi] Tối ưu P2: pattern ContextRequired (không validator) mà file không có từ khoá nào của nó → mọi chỗ khớp đều bị loại ở các nhánh bên dưới
+            // (proximity / ContextWindow / chế độ bảng đều cần từ khoá có mặt; FailsGoKeywordCheck trả false nên không đếm proximityRejects) → bỏ qua.
+            // Từ khoá rỗng "" tính là có mặt như string.Contains("") nên không bỏ qua trong trường hợp đó (skipEmpty: false).
+            if (PrefilterEnabled && patternIndex < _contextKeywords.Length && _contextKeywords[patternIndex] is { } contextKeywords
+                && !keywordPresence.ContainsAny(contextKeywords, skipEmpty: false))
+            {
+                continue;
             }
             try
             {

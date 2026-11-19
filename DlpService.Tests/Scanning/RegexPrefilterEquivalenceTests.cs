@@ -39,6 +39,66 @@ public class RegexPrefilterEquivalenceTests
         Assert.Equal(ScanSnapshot.Of(off.Scan(content)), ScanSnapshot.Of(on.Scan(content)));
     }
 
+    // ---- P2: bỏ qua pattern context_required không validator khi file không có từ khoá ----
+
+    private static SensitivePattern Ctx(string name, string regex, string[] keywords, Func<string, bool>? validator = null, bool excludeIfNoKw = false) => new()
+    {
+        Name = name,
+        Regex = new System.Text.RegularExpressions.Regex(regex, System.Text.RegularExpressions.RegexOptions.Compiled, TimeSpan.FromSeconds(1)),
+        Severity = "HIGH",
+        ContextRequired = true,
+        Keywords = [.. keywords],
+        PrimaryKeywords = [.. keywords],
+        ContextWindow = 40,
+        Validator = validator,
+        ExcludeIfNoKeywords = excludeIfNoKw,
+        Confidence = 0.9,
+    };
+
+    [Theory]
+    [InlineData("123456 và 654321")]                               // không có từ khoá nào
+    [InlineData("alpha 123456")]
+    [InlineData("beta 123456")]
+    [InlineData("gamma 123456 654321 111111 222222 333333 444444")]
+    [InlineData("delta 123456 và 999999")]
+    [InlineData("chỉ có dãy số 12345678901234 trong file, không từ khoá")]
+    [InlineData("")]
+    public void P2_CacPatternTuyBien_BatTatCungKetQua(string content)
+    {
+        var patterns = new List<SensitivePattern>
+        {
+            Ctx("Dup", @"\b\d{6}\b", ["alpha"]),
+            Ctx("Dup", @"\b\d{6}\b", ["beta"]),                  // cùng Name khác từ khoá: KHÔNG được bỏ qua
+            Ctx("Solo", @"\b\d{6}\b", ["gamma"], excludeIfNoKw: true),
+            Ctx("Val", @"\b\d{6}\b", ["delta"], validator: v => v != "999999"),   // có validator: giữ nguyên
+            Ctx("EmptyKw", @"\b\d{6}\b", [""]),                  // từ khoá rỗng = luôn "có mặt"
+        };
+        var on = new RegexScanner(patterns, minConfidence: 0) { PrefilterEnabled = true };
+        var off = new RegexScanner(patterns, minConfidence: 0) { PrefilterEnabled = false };
+        Assert.Equal(ScanSnapshot.Of(off.Scan(content)), ScanSnapshot.Of(on.Scan(content)));
+    }
+
+    [Fact]
+    public void P2_DieuKienDuDieuKien_DungNhuThietKe()
+    {
+        var patterns = new List<SensitivePattern>
+        {
+            Ctx("Solo", @"\b\d{6}\b", ["gamma"]),                // đủ điều kiện
+            Ctx("Val", @"\b\d{6}\b", ["delta"], validator: _ => true),   // có validator → không
+            Ctx("Dup", @"\b\d{6}\b", ["alpha"]),
+            Ctx("Dup", @"\b\d{6}\b", ["beta"]),                  // tên trùng, từ khoá khác → cả hai không
+            new SensitivePattern { Name = "NoCtx", Regex = new System.Text.RegularExpressions.Regex(@"\d+"), Severity = "LOW" }, // không context_required → không
+        };
+        Assert.Equal(1, new RegexScanner(patterns).ContextSkippablePatternCount);
+    }
+
+    [Fact]
+    public void P2_BoRuleThat_CoNhieuPatternDuDieuKien()
+    {
+        // Chống hồi quy: bộ rule thật có 59 pattern context_required không validator; cho phép một số ít bị loại vì tên trùng từ khoá khác
+        Assert.InRange(new RegexScanner(Patterns.Value).ContextSkippablePatternCount, 40, 59);
+    }
+
     [Fact]
     public void CacPatternEmailThat_CoKyTuBatBuoc()
     {
