@@ -9,7 +9,8 @@ namespace DlpService.Scanning;
 
 // (ILogger logger) = primary constructor: nhận logger từ ngoài, dùng được ở mọi hàm trong class
 /// <summary>Tự động nạp rule quét (SensitivePattern) từ các file *.json trong 1 thư mục.</summary>
-public class RuleLoader(ILogger logger)
+// [Thay đổi] P5: useEngineHints=false tắt RegexEngineHints (chỉ để test/benchmark so sánh "có gợi ý = không gợi ý"; service luôn bật)
+public class RuleLoader(ILogger logger, bool useEngineHints = true)
 {
     // Timeout cho mỗi regex, tránh regex bị treo (ReDoS) làm đứng service
     private static readonly TimeSpan RegexTimeout = TimeSpan.FromSeconds(1);
@@ -410,7 +411,18 @@ public class RuleLoader(ILogger logger)
             Regex regex;
             try
             {
-                regex = new Regex(patternDef.Regex, RegexOptions.Compiled, RegexTimeout);
+                // [Thay đổi] P5: vài pattern đắt nhất dùng engine NonBacktracking (xem RegexEngineHints); còn lại Compiled như cũ
+                var options = RegexEngineHints.OptionsFor(rule.Id, patIdx, patternDef.Regex, useEngineHints);
+                try
+                {
+                    regex = new Regex(patternDef.Regex, options, RegexTimeout);
+                }
+                catch (NotSupportedException ex) when ((options & RegexOptions.NonBacktracking) != 0)
+                {
+                    // NonBacktracking không hỗ trợ cấu trúc này (lookaround, backreference...) → quay về Compiled, không bỏ pattern
+                    logger.LogWarning("Pattern con của rule {name} không dùng được NonBacktracking ({error}), dùng Compiled", rule.Name, ex.Message);
+                    regex = new Regex(patternDef.Regex, RegexOptions.Compiled, RegexTimeout);
+                }
             }
             catch (ArgumentException ex)
             {
