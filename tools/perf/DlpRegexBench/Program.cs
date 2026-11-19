@@ -33,10 +33,15 @@ internal static class Program
         string? mode = args.FirstOrDefault();
         string? dataset = args.Length > 1 && !args[1].StartsWith("--", StringComparison.Ordinal) ? args[1] : null;
         var files = SelectFiles(dataset, Arg(args, "--sets"), Arg(args, "--rawdata"), int.Parse(Arg(args, "--raw-sample") ?? "0", Inv));
-        if (mode is not ("rules" or "fingerprint") || files.Count == 0)
+        // [Thay đổi] P0 (giai đoạn 2): thêm 3 chế độ thí nghiệm biến thể regex (xem Variants.cs). overhead/startup không cần file.
+        bool needsFiles = mode is "rules" or "fingerprint" or "variants";
+        if (mode is not ("rules" or "fingerprint" or "variants" or "overhead" or "startup") || (needsFiles && files.Count == 0))
         {
             Console.Error.WriteLine("Cách dùng:\n  DlpRegexBench rules <dataset> [--sets ...] [--rawdata <dir> --raw-sample N] [--runs 5] [--out <thư mục>]\n" +
-                                    "  DlpRegexBench fingerprint <dataset> [--sets ...] [--rawdata <dir> --raw-sample N] --out <file.csv>");
+                                    "  DlpRegexBench fingerprint <dataset> [--sets ...] [--rawdata <dir> --raw-sample N] --out <file.csv>\n" +
+                                    "  DlpRegexBench variants <dataset> [--sets ...] [--rawdata <dir> --raw-sample N] [--runs 5] [--warmup 1] [--out <thư mục>]\n" +
+                                    "  DlpRegexBench overhead [--reps 2000] [--out <thư mục>]\n" +
+                                    "  DlpRegexBench startup --options compiled|interpreted");
             return 1;
         }
 
@@ -46,6 +51,18 @@ internal static class Program
         // [Thay đổi] --max-scan-seconds: ngân sách thời gian quét 1 file (mặc định = service, 10 s). Đặt lớn (VD 600) để đo chi phí THẬT
         // của file chạm trần — với trần 10 s, CSV lớn chỉ cho ra "≈ 10 s", không đo được độ dốc theo số dòng (R3).
         maxScan = TimeSpan.FromSeconds(double.Parse(Arg(args, "--max-scan-seconds") ?? RegexScanner.DefaultMaxScanTime.TotalSeconds.ToString(Inv), Inv));
+        if (mode == "variants")
+        {
+            return VariantsBench.Run(files, patterns, reader, int.Parse(Arg(args, "--runs") ?? "5", Inv), int.Parse(Arg(args, "--warmup") ?? "1", Inv), Arg(args, "--out") ?? Path.Combine("tools", "perf", "baseline", "variants"));
+        }
+        if (mode == "overhead")
+        {
+            return VariantsBench.Overhead(patterns, int.Parse(Arg(args, "--reps") ?? "2000", Inv), Arg(args, "--out") ?? Path.Combine("tools", "perf", "baseline", "variants"));
+        }
+        if (mode == "startup")
+        {
+            return VariantsBench.Startup(patterns, Arg(args, "--options") ?? "compiled");
+        }
         return mode == "rules"
             ? Rules(files, patterns, reader, int.Parse(Arg(args, "--runs") ?? "5", Inv), int.Parse(Arg(args, "--warmup") ?? "30", Inv), Arg(args, "--out") ?? Path.Combine("tools", "perf", "baseline", "regex"))
             : Fingerprint(files, patterns, reader, rulesDir, Arg(args, "--out") ?? "fingerprint.csv");
