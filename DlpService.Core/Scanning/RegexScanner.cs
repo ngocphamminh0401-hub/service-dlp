@@ -8,6 +8,9 @@ public class RegexScanner
 {
     private readonly List<SensitivePattern> _patterns;
 
+    // [Thay đổi] Tối ưu A2: tập mọi từ khoá của bộ rule (+ từ khoá "tài liệu mẫu") dựng 1 lần; mỗi file tạo 1 Presence để tra "từ khoá có trong file không"
+    private readonly KeywordUniverse _keywordUniverse;
+
     // [Thay đổi] Merger mục 7.4 "Lưu vết": rules_ver ghi kèm scan_result để biết kết quả được tính bằng bộ rule nào.
     /// <summary>Phiên bản bộ rule đang dùng (RuleLoader.ComputeRulesVersion), rỗng nếu không truyền lúc tạo scanner.</summary>
     public string RulesVer { get; }
@@ -28,6 +31,9 @@ public class RegexScanner
         TimeSpan? maxScanTime = null)
     {
         _patterns = patterns;
+        _keywordUniverse = new KeywordUniverse(patterns
+            .SelectMany(p => p.Keywords.Concat(p.PrimaryKeywords).Concat(p.SecondaryKeywords))
+            .Concat(DocContextProbeKeywords));
         RulesVer = rulesVer;
         MinConfidence = Math.Clamp(minConfidence, 0, 1);
         MaxScanTime = maxScanTime is { } t && t > TimeSpan.Zero ? t : DefaultMaxScanTime;
@@ -98,6 +104,7 @@ public class RegexScanner
         int proximityRejects = 0;
         int gateDowngrades = 0;
         var ruleHasKeyword = new Dictionary<string, bool>();
+        var keywordPresence = _keywordUniverse.ForContent(content); // [Thay đổi] Tối ưu A2: chỉ mục từ khoá có mặt trong file (tính lười, 1 lượt quét)
         // [Thay đổi] Sửa "dãy số lạ" (nhánh A): vị trí các chỗ regex đã khớp nhưng bị validator loại (VD MST sai checksum,
         // SĐT sai đầu số) — rule đã NHẬN RA định dạng nên không tính là "số lạ" (Go không có các validator này, số đó nằm
         // trong chỗ khớp của Go). Chỉ dùng cho counter, không đổi kết quả quét.
@@ -144,7 +151,7 @@ public class RegexScanner
                     // exclude_if_no_keywords, xét mọi pattern con, ngay sau validator/placeholder. Chỉ ĐẾM, không loại chỗ
                     // khớp (việc lọc vẫn theo ContextRequired/Proximity bên dưới). Trước đây đếm mọi chỗ khớp context_required
                     // bị loại → C# kêu ở 53 % file nhánh B so với 4,6 % của Go, kéo conf nhánh B xuống sai.
-                    if (pattern.ExcludeIfNoKeywords && FailsGoKeywordCheck(pattern, match, content, ruleHasKeyword))
+                    if (pattern.ExcludeIfNoKeywords && FailsGoKeywordCheck(pattern, match, content, ruleHasKeyword, keywordPresence))
                     {
                         proximityRejects++;
                     }
@@ -201,15 +208,19 @@ public class RegexScanner
         }
 
         // [Thay đổi] Bậc 3 #2: xét chế độ bảng cho các chỗ khớp đã trượt proximity (xem giải thích ở khai báo deferred)
+        // [Thay đổi] Tối ưu A2-b: "file có từ khoá proximity của pattern này không" là hằng số theo (pattern, content) — trước đây tính lại
+        // cho MỖI chỗ khớp hoãn (CSV 10k dòng: hàng chục nghìn lần × quét toàn văn bản). Nay tính 1 lần / pattern / file (cache theo đối tượng
+        // pattern; khoá theo tham chiếu vì nhiều rule dùng chung Name). Kết quả giữ nguyên tuyệt đối, chỉ bớt lần quét lặp.
+        var proximityKeywordInFile = new Dictionary<SensitivePattern, bool>(ReferenceEqualityComparer.Instance);
         foreach (var (pattern, match) in deferred)
         {
-            if (budget.Elapsed > MaxScanTime) // [Thay đổi] M4: mỗi phần tử deferred quét Contains trên CẢ content
+            if (budget.Elapsed > MaxScanTime) // [Thay đổi] M4: kiểm ngân sách trước mỗi phần tử deferred
             {
                 budgetExceeded = true;
                 break;
             }
             bool looksLikeTable = candidateCounts.GetValueOrDefault(pattern.Name) >= TableModeMinMatches;
-            if (looksLikeTable && ProximityKeywords(pattern).Any(k => content.Contains(k, StringComparison.OrdinalIgnoreCase)))
+            if (looksLikeTable && HasProximityKeywordInFile(pattern, keywordPresence, proximityKeywordInFile))
             {
                 AddSurvivor(pattern, match, content, docDiscountCache, survivors); // [Thay đổi] Công thức Go: + cache hệ số tài liệu
             }
@@ -381,7 +392,7 @@ public class RegexScanner
             Matches = results,
             TimedOutPatterns = timedOut.ToList(),
             BudgetExceeded = budgetExceeded, // [Thay đổi] M4
-            Telemetry = complete ? BuildTelemetry(content, results, proximityRejects, gateDowngrades, validatorRejectedSpans) : ScanTelemetry.Empty
+            Telemetry = complete ? BuildTelemetry(content, results, proximityRejects, gateDowngrades, validatorRejectedSpans, keywordPresence) : ScanTelemetry.Empty
         };
     }
 
@@ -399,11 +410,11 @@ public class RegexScanner
     private static readonly Regex UnstructuredNumericRegex = new(@"[0-9]{8,19}", RegexOptions.Compiled, TimeSpan.FromSeconds(1));
 
     // Rule có từ khoá (primary hoặc secondary) ở bất kỳ đâu trong file không — tính 1 lần cho mỗi tên rule trong lần quét
-    private static bool RuleHasKeyword(SensitivePattern pattern, string content, Dictionary<string, bool> cache)
+    private static bool RuleHasKeyword(SensitivePattern pattern, KeywordUniverse.Presence presence, Dictionary<string, bool> cache)
     {
         if (!cache.TryGetValue(pattern.Name, out bool has))
         {
-            has = pattern.Keywords.Any(k => k.Length > 0 && content.Contains(k, StringComparison.OrdinalIgnoreCase));
+            has = presence.ContainsAny(pattern.Keywords, skipEmpty: true); // [Thay đổi] Tối ưu A2: tra chỉ mục thay vì Contains toàn văn bản
             cache[pattern.Name] = has;
         }
         return has;
@@ -413,9 +424,10 @@ public class RegexScanner
     // này VÀ đếm proximity_reject. Hai trường hợp Go loại nhưng KHÔNG đếm thì trả false:
     //  - pattern context_required mà cả file không có từ khoá nào của rule (Go bỏ qua cả pattern từ trước);
     //  - pattern con có require_keyword_within và trượt (Go loại ở bước trước, im lặng).
-    private static bool FailsGoKeywordCheck(SensitivePattern pattern, Match match, string content, Dictionary<string, bool> ruleHasKeyword)
+    private static bool FailsGoKeywordCheck(SensitivePattern pattern, Match match, string content, Dictionary<string, bool> ruleHasKeyword,
+        KeywordUniverse.Presence presence)
     {
-        bool hasAnyKeyword = RuleHasKeyword(pattern, content, ruleHasKeyword);
+        bool hasAnyKeyword = RuleHasKeyword(pattern, presence, ruleHasKeyword);
         if (pattern.ContextRequired && !hasAnyKeyword)
         {
             return false;
@@ -445,7 +457,7 @@ public class RegexScanner
     // Gom các counter cần TOÀN BỘ kết quả quét (chỗ khớp cuối cùng) — tính sau vòng gộp theo rule
     // [Thay đổi] Sửa "dãy số lạ": + validatorRejectedSpans. [Thay đổi] Đoán domain: + danh sách rule có từ khoá primary.
     private ScanTelemetry BuildTelemetry(string content, List<ScanMatch> results, int proximityRejects, int gateDowngrades,
-        List<(int Start, int End)> validatorRejectedSpans)
+        List<(int Start, int End)> validatorRejectedSpans, KeywordUniverse.Presence keywordPresence)
     {
         // Số chỗ khớp cuối cùng theo khoá rule (RuleId, không có thì tên) — dùng cho keyword_hit_no_match + volume near-miss
         var matchCountByRule = results
@@ -462,7 +474,7 @@ public class RegexScanner
             int count = matchCountByRule.GetValueOrDefault(rule.Key);
 
             // [Thay đổi] Đoán domain: xét từ khoá primary cho MỌI rule (không chỉ rule không có chỗ khớp)
-            bool hasPrimary = first.PrimaryKeywords.Any(k => k.Length > 0 && content.Contains(k, StringComparison.OrdinalIgnoreCase));
+            bool hasPrimary = keywordPresence.ContainsAny(first.PrimaryKeywords, skipEmpty: true); // [Thay đổi] Tối ưu A2: tra chỉ mục
             if (hasPrimary)
             {
                 primaryKeywordRules.Add(new KeywordRuleHit(rule.Key, first.Category));
@@ -492,7 +504,7 @@ public class RegexScanner
             LevelGateDowngradeCount = gateDowngrades,
             KeywordHitNoMatchPrimaryRules = keywordHitNoMatch,
             UnstructuredNumericHits = CountUnstructuredNumericHits(content, results, validatorRejectedSpans),
-            DocContextDiscount = DocContextProbeKeywords.Any(k => content.Contains(k, StringComparison.OrdinalIgnoreCase)),
+            DocContextDiscount = keywordPresence.ContainsAny(DocContextProbeKeywords, skipEmpty: false), // [Thay đổi] Tối ưu A2
             IdentifierVolumeNearGate = volumeNearGate,
             EffectiveLengthBytes = System.Text.Encoding.UTF8.GetByteCount(content),
             PrimaryKeywordRules = primaryKeywordRules // [Thay đổi] Đoán domain
@@ -505,6 +517,10 @@ public class RegexScanner
     private static int CountUnstructuredNumericHits(string content, List<ScanMatch> results, List<(int Start, int End)> validatorRejectedSpans)
     {
         int count = 0;
+        // [Thay đổi] Tối ưu A4: trước đây mỗi dãy số duyệt lại TOÀN BỘ results + validatorRejectedSpans (O(N×M), CSV 30k dòng: 60% thời gian Scan).
+        // Nay gộp mọi khoảng đã nhận ra, sắp theo Start một lần; mỗi dãy số chỉ tìm nhị phân (O(log M)). Điều kiện chồng giữ nguyên
+        // (s < End && e > Start) nên kết quả đếm không đổi.
+        var overlap = new SpanOverlapIndex(results, validatorRejectedSpans);
         try
         {
             foreach (Match m in UnstructuredNumericRegex.Matches(content))
@@ -514,9 +530,7 @@ public class RegexScanner
                 {
                     continue;
                 }
-                bool inMatch = results.Any(r => s < r.Index + r.Value.Length && e > r.Index)
-                    || validatorRejectedSpans.Any(v => s < v.End && e > v.Start);
-                if (!inMatch)
+                if (!overlap.Overlaps(s, e))
                 {
                     count++;
                 }
@@ -527,6 +541,50 @@ public class RegexScanner
             // Giữ số đếm được — đây chỉ là tín hiệu quan sát, không đáng làm hỏng cả lần quét
         }
         return count;
+    }
+
+    // [Thay đổi] Tối ưu A4: chỉ mục "khoảng [s, e) có chồng lên khoảng đã nhận ra nào không" — sắp theo Start + max End cộng dồn.
+    // Tồn tại khoảng với Start < e và End > s  ⇔  max(End) trong các khoảng có Start < e vượt s (đúng bằng điều kiện cũ).
+    private sealed class SpanOverlapIndex
+    {
+        private readonly int[] _starts;
+        private readonly int[] _maxEndUpTo;
+
+        public SpanOverlapIndex(List<ScanMatch> results, List<(int Start, int End)> rejected)
+        {
+            var spans = new (int Start, int End)[results.Count + rejected.Count];
+            int i = 0;
+            foreach (var r in results)
+            {
+                spans[i++] = (r.Index, r.Index + r.Value.Length);
+            }
+            foreach (var v in rejected)
+            {
+                spans[i++] = v;
+            }
+            Array.Sort(spans, (a, b) => a.Start.CompareTo(b.Start));
+            _starts = new int[spans.Length];
+            _maxEndUpTo = new int[spans.Length];
+            int maxEnd = int.MinValue;
+            for (int k = 0; k < spans.Length; k++)
+            {
+                _starts[k] = spans[k].Start;
+                maxEnd = Math.Max(maxEnd, spans[k].End);
+                _maxEndUpTo[k] = maxEnd;
+            }
+        }
+
+        public bool Overlaps(int s, int e)
+        {
+            // số khoảng có Start < e (tìm nhị phân biên trên)
+            int lo = 0, hi = _starts.Length;
+            while (lo < hi)
+            {
+                int mid = (lo + hi) >>> 1;
+                if (_starts[mid] < e) lo = mid + 1; else hi = mid;
+            }
+            return lo > 0 && _maxEndUpTo[lo - 1] > s;
+        }
     }
 
     // [Thay đổi] Bậc 3 #2: tách từ vòng 1 của Scan() — áp negation_filter + escalation cho 1 chỗ khớp đã qua các
@@ -679,6 +737,18 @@ public class RegexScanner
         proximity.IncludeSecondary
             ? pattern.PrimaryKeywords.Concat(pattern.SecondaryKeywords)
             : pattern.PrimaryKeywords;
+
+    // [Thay đổi] Tối ưu A2-b: file có chứa ÍT NHẤT 1 từ khoá proximity của pattern (ở bất kỳ đâu) không — nhớ kết quả trong `cache`
+    // (do Scan tạo, sống trong 1 lần quét 1 file) để vòng chế độ bảng không quét lại toàn văn bản cho mỗi chỗ khớp hoãn.
+    private static bool HasProximityKeywordInFile(SensitivePattern pattern, KeywordUniverse.Presence presence, Dictionary<SensitivePattern, bool> cache)
+    {
+        if (!cache.TryGetValue(pattern, out bool has))
+        {
+            has = presence.ContainsAny(ProximityKeywords(pattern), skipEmpty: false); // [Thay đổi] Tối ưu A2: tra chỉ mục (từ khoá rỗng vẫn → true như Contains)
+            cache[pattern] = has;
+        }
+        return has;
+    }
 
     // [Thay đổi] Bậc 3 #2: từ khoá có nằm trong MaxChars ký tự quanh chỗ khớp không — nếu SameSentence thì vùng tìm
     // còn bị cắt thêm ở ranh giới câu (lấy phần GIAO giữa "vùng MaxChars" và "câu chứa chỗ khớp").
